@@ -1,0 +1,8 @@
+{
+  "profiles": {
+    "AutoInvoke.Generator": {
+      "commandName": "DebugRoslynComponent",
+      "targetProject": "..\\AutoInvoke.Generator.Example\\AutoInvoke.Generator.Example.csproj"
+    }
+  }
+}

@@ -1,4 +1,5 @@
-
+[![NuGet](https://img.shields.io/nuget/v/AutoInvoke.Generator.svg?style=flat-square)](https://www.nuget.org/packages/AutoInvoke.Generator/)
+[![GitHub license](https://img.shields.io/github/license/LokiMidgard/AutoInvoke.Generator.svg?style=flat-square)](https://tldrlegal.com/license/mit-license#summary)
 # AutoInvoke
 
 This Generator let you anotate an Parameterless Generic Method with exactly one TypeArgument.

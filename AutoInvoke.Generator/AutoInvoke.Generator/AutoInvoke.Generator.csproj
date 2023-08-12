@@ -2,9 +2,12 @@
 
 	<PropertyGroup>
 		<TargetFrameworks>net6.0;netstandard2.0</TargetFrameworks>
+		<VersionPrefix>0.0.1</VersionPrefix>
+		<VersionSuffix Condition="'$(Configuration)' == 'Debug'" >debug.2</VersionSuffix>
 		<LangVersion>11</LangVersion>
 		<Nullable>enable</Nullable>
 		<ImplicitUsings>enable</ImplicitUsings>
+		<EnforceExtendedAnalyzerRules>true</EnforceExtendedAnalyzerRules>
 	</PropertyGroup>
 
 	<PropertyGroup>
@@ -15,16 +18,33 @@
 		<IsRoslynComponent>true</IsRoslynComponent>
 	</PropertyGroup>
 
+	<PropertyGroup>
+		<PackageId>AutoInvoke.Generator</PackageId>
+		<Authors>Patrick Kranz</Authors>
+		<PackageProjectUrl>https://github.com/LokiMidgard/AutoInvoke.Generator</PackageProjectUrl>
+		<PackageLicenseExpression>Unlicense</PackageLicenseExpression>
+		<PackageRequireLicenseAcceptance>false</PackageRequireLicenseAcceptance>
+
+		<RepositoryUrl>https://github.com/LokiMidgard/AutoInvoke.Generator.git</RepositoryUrl>
+		<RepositoryType>git</RepositoryType>
+		<PackageTags>sourcegenerator</PackageTags>
+		<PackageReadmeFile>readme.md</PackageReadmeFile>
+		<Description>
+			A generator that invokes a specified Metohd for ever Type in your Project that sattisfis a defined constraint
+		</Description>
+
+	</PropertyGroup>
+
 	<ItemGroup>
 		<PackageReference Include="AnyOf.SourceGenerator" Version="0.3.0">
-		  <PrivateAssets>all</PrivateAssets>
-		  <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+			<PrivateAssets>all</PrivateAssets>
+			<IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
 		</PackageReference>
 		<PackageReference Include="Microsoft.CodeAnalysis.Analyzers" Version="3.3.3" PrivateAssets="all" />
 		<PackageReference Include="Microsoft.CodeAnalysis.CSharp.Workspaces" Version="4.3.1" PrivateAssets="all" />
 		<PackageReference Include="SourceGenerator.Helper.CopyCode" Version="0.0.1">
-		  <PrivateAssets>all</PrivateAssets>
-		  <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+			<PrivateAssets>all</PrivateAssets>
+			<IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
 		</PackageReference>
 		<PackageReference Include="IDisposableAnalyzers" Version="4.0.6">
 			<PrivateAssets>all</PrivateAssets>

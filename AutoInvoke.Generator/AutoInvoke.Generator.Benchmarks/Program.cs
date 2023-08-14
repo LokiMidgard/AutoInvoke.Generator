@@ -1,4 +1,5 @@
 using System.Diagnostics;
+
 using BenchmarkDotNet.Columns;
 using BenchmarkDotNet.Configs;
 using BenchmarkDotNet.Diagnosers;
@@ -8,33 +9,28 @@ using BenchmarkDotNet.Jobs;
 using BenchmarkDotNet.Running;
 using BenchmarkDotNet.Validators;
 
-namespace AutoInvoke.Generator.Benchmarks
-{
-	internal static class Program
-	{
-		private static void Main(string[] args)
-		{
-			IConfig config = Debugger.IsAttached
-				? CreateDebugConfiguration()
-				: CreateBenchmarkConfiguration();
+namespace AutoInvoke.Generator.Benchmarks;
 
-			_ = BenchmarkSwitcher.FromAssembly(typeof(Program).Assembly).Run(args, config);
+internal static class Program {
+    private static void Main(string[] args) {
+        IConfig config = Debugger.IsAttached
+            ? CreateDebugConfiguration()
+            : CreateBenchmarkConfiguration();
 
-			static IConfig CreateDebugConfiguration()
-			{
-				return new DebugInProcessConfig();
-			}
+        _ = BenchmarkSwitcher.FromAssembly(typeof(Program).Assembly).Run(args, config);
 
-			static IConfig CreateBenchmarkConfiguration()
-			{
-				return DefaultConfig.Instance
-					.AddJob(Job.InProcess.WithRuntime(ClrRuntime.Net472))
-					.AddJob(Job.InProcess.WithRuntime(CoreRuntime.Core60))
-					.AddColumn(StatisticColumn.Min, StatisticColumn.Max, StatisticColumn.Median)
-					.AddDiagnoser(MemoryDiagnoser.Default)
-					.AddExporter(DefaultExporters.AsciiDoc)
-					.AddValidator(ExecutionValidator.FailOnError);
-			}
-		}
-	}
+        static IConfig CreateDebugConfiguration() {
+            return new DebugInProcessConfig();
+        }
+
+        static IConfig CreateBenchmarkConfiguration() {
+            return DefaultConfig.Instance
+                .AddJob(Job.InProcess.WithRuntime(ClrRuntime.Net472))
+                .AddJob(Job.InProcess.WithRuntime(CoreRuntime.Core60))
+                .AddColumn(StatisticColumn.Min, StatisticColumn.Max, StatisticColumn.Median)
+                .AddDiagnoser(MemoryDiagnoser.Default)
+                .AddExporter(DefaultExporters.AsciiDoc)
+                .AddValidator(ExecutionValidator.FailOnError);
+        }
+    }
 }

@@ -85,14 +85,11 @@ partial class FileHandler {
 - You can control wich type of types shold get called. E.g. by
   defaurd no calls are generated for abstract classes. But you can overide this setting
 - The anotated method can be static
-- The return type can be void or Task. Tasks will be awaited.
+- If the anotated method has parameters the generated method has the same parametrs
+- If the return type is not `void` the generated methods returntype is an array of the return type of the attributed method
 
 ### Limitations
-- Currently Selfreferencing generic types are not supported. E.g. you can't get all Types `T` that implement `ICompalable<T>`.
-  You can however get all types that implement `ICompalable<Foo>`
-- You can't call static classes. Generics do not allow this.
+- Only one Typeparameter is supported you can't do somthing like `Foo<T1,T2>() where T1: IComparable<T2>`
+- You can't call static Types. Generics do not allow this.
 
 
-### Possible Featurs 
-- Support selfreferencing Types
-- Allow other return types and return an array of the results.

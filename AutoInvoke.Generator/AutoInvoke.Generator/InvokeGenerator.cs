@@ -22,9 +22,7 @@ namespace AutoInvoke.Generator;
 
 [Generator(LanguageNames.CSharp)]
 public class InvokeGenerator : IIncrementalGenerator {
-    private static readonly DiagnosticDescriptor IG0001 = new DiagnosticDescriptor("IG0001", "Invalid Return Type", "The Return Type must be void or Task", "Design", DiagnosticSeverity.Error, true);
-    private static readonly DiagnosticDescriptor IG0002 = new DiagnosticDescriptor("IG0002", "No Parameter Allowd", "The parameter list must be empty", "Design", DiagnosticSeverity.Error, true);
-    private static readonly DiagnosticDescriptor IG0003 = new DiagnosticDescriptor("IG0003", "Wrong number of Type Parameters", "The method needs exactly one Type Parameter", "Design", DiagnosticSeverity.Error, true);
+    private static readonly DiagnosticDescriptor IG0004 = new DiagnosticDescriptor("IG0004", "Parameter Type not supported", "The parameter must be of a named type", "Design", DiagnosticSeverity.Error, true);
     public void Initialize(IncrementalGeneratorInitializationContext context) {
         var fullQualifiedAttribute = typeof(FindAndInvokeAttribute).FullName!;
 
@@ -62,7 +60,10 @@ public class InvokeGenerator : IIncrementalGenerator {
             var name = GetName(symbol);
 
             var baseTypes = baseTypeBuilder.ToImmutableHashSet();
-            var interfaces = symbol.AllInterfaces.Select(GetName).ToImmutableHashSet();
+            var interfaces = symbol.AllInterfaces
+            .Select(x => SubstituteTypeParameters(x, symbol))
+            .Select(GetName)
+            .ToImmutableHashSet();
 
             var isStatic = symbol.IsStatic;
             var isAbstract = symbol.IsAbstract;
@@ -89,7 +90,6 @@ public class InvokeGenerator : IIncrementalGenerator {
                                 && configuration.TypesToHandle.All(condition => {
                                     return condition switch {
                                         ConstructorConstraint => hasParameterlessConstructor,
-                                        DefaultConstraint => isClass,
                                         TypeConstraint typeConstraint => name == typeConstraint.Type || interfaces.Contains(typeConstraint.Type) || baseTypes.Contains(typeConstraint.Type),
                                         ClassConstraint => isClass,
                                         StructConstraint => isStruct,
@@ -120,17 +120,20 @@ public class InvokeGenerator : IIncrementalGenerator {
             sb.WriteSingleLineNamespace(method.Namespace);
             sb.WriteParent(method.DefinedIn, w => {
 
-                w.WriteMethodBlock(SourceCodeWriterExtensions.Visibility.Private, method.ImplementedMethodName, method.IsStactic, method.IsAsync, Enumerable.Empty<(string, string)>(), method.IsAsync ? "System.Threading.Tasks.Task" : "void", w => {
-                    if (method.IsAsync) {
-                        w.WriteLine(w => {
-                            w.Write("await System.Threading.Tasks.Task.WhenAll(");
-                            w.Write(string.Join(", ", types.Select(type => $"{method.MethodToCall}<{type}>()")));
-                            w.Write(");");
-                        });
-                    } else {
+                string returnType = method.ReturnType is null ? "void" : $"{method.ReturnType}[]";
+
+                w.WriteMethodBlock(SourceCodeWriterExtensions.Visibility.Private, method.ImplementedMethodName, method.IsStactic, false, method.Parameters.Select(x => (GetName(x.Type), x.Name)), returnType, w => {
+                    if (method.ReturnType is null) {
                         foreach (var type in types) {
-                            w.WriteLine($"{method.MethodToCall}<{type}>();");
+                            w.WriteLine($"{method.MethodToCall}<{type}>({string.Join(", ", method.Parameters.Select(x => x.Name))});");
                         }
+                    } else {
+
+                        w.WriteLine(w => {
+                            w.Write("return new []{");
+                            w.Write(string.Join(", ", types.Select(type => $"{method.MethodToCall}<{type}>({string.Join(", ", method.Parameters.Select(x => x.Name))})")));
+                            w.Write("};");
+                        });
                     }
                 });
             });
@@ -148,43 +151,57 @@ public class InvokeGenerator : IIncrementalGenerator {
         var taskTypeInfo = context.SemanticModel.Compilation.GetTypeByMetadataName("System.Threading.Tasks.Task");
 
         var methodName = method.Identifier.Text;
-        var isAsync = !((method.ReturnType as PredefinedTypeSyntax)?.Keyword.Text == "void");
+        var returnType = !((method.ReturnType as PredefinedTypeSyntax)?.Keyword.Text == "void") ? method.ReturnType : null;
 
         var errors = ImmutableArray.CreateBuilder<Diagnostic>();
-        if (isAsync) {
-            //check if it is actually a Task
-            if (context.SemanticModel.GetTypeInfo(method.ReturnType).Type is not INamedTypeSymbol propablyTaskSymbol
-            || !SymbolEqualityComparer.Default.Equals(taskTypeInfo, propablyTaskSymbol)) {
-                errors.Add(Diagnostic.Create(IG0001, Location.Create(method.SyntaxTree, method.ReturnType.Span)));
-            }
+        //if (isAsync) {
+        //    //check if it is actually a Task
+        //    if (context.SemanticModel.GetTypeInfo(method.ReturnType).Type is not INamedTypeSymbol propablyTaskSymbol
+        //    || !SymbolEqualityComparer.Default.Equals(taskTypeInfo, propablyTaskSymbol)) {
+        //        errors.Add(Diagnostic.Create(IG0001, Location.Create(method.SyntaxTree, method.ReturnType.Span)));
+        //    }
+        //}
+        //if (method.ParameterList.Parameters.Count > 0) {
+        //    errors.Add(Diagnostic.Create(IG0002, Location.Create(method.SyntaxTree, method.ParameterList.Span)));
+        //}
+        //if (method.TypeParameterList?.Parameters.Count != 1) {
+        //    errors.Add(Diagnostic.Create(IG0003, Location.Create(method.SyntaxTree, (method.TypeParameterList?.Span ?? new Microsoft.CodeAnalysis.Text.TextSpan(method.Identifier.Span.Start, method.ParameterList.Span.End - method.Identifier.Span.Start)))));
+        //}
+
+        var methodSymbol = context.TargetSymbol as IMethodSymbol ?? throw new NotSupportedException();
+
+       
+
+        //if (errors.Count > 0) {
+        //    return errors.ToImmutable();
+        //}
+
+        var parameters = methodSymbol.Parameters;
+
+        var typeParameterBuilder = ImmutableList.CreateBuilder<Constraints>();
+
+        ITypeParameterSymbol typeParameterSymbol = methodSymbol.TypeParameters[0]; // we currently support only one
+        typeParameterBuilder.AddRange(typeParameterSymbol.ConstraintTypes.Select(x => {
+            INamedTypeSymbol toConstrainTo = (INamedTypeSymbol)x;
+            var toSubstitute = typeParameterSymbol.OriginalDefinition;
+            toConstrainTo = SubstituteTypeParameters(toConstrainTo, toSubstitute);
+            return new TypeConstraint() { Type = GetName(toConstrainTo) };
+
+        }));
+
+        if (typeParameterSymbol.HasReferenceTypeConstraint) {
+            typeParameterBuilder.Add(new ClassConstraint());
         }
-        if (method.ParameterList.Parameters.Count > 0) {
-            errors.Add(Diagnostic.Create(IG0002, Location.Create(method.SyntaxTree, method.ParameterList.Span)));
+        if (typeParameterSymbol.HasValueTypeConstraint) {
+            typeParameterBuilder.Add(new StructConstraint());
         }
-        if (method.TypeParameterList?.Parameters.Count != 1) {
-            errors.Add(Diagnostic.Create(IG0003, Location.Create(method.SyntaxTree, (method.TypeParameterList?.Span ?? new Microsoft.CodeAnalysis.Text.TextSpan(method.Identifier.Span.Start, method.ParameterList.Span.End - method.Identifier.Span.Start)))));
+        if (typeParameterSymbol.HasConstructorConstraint) {
+            typeParameterBuilder.Add(new ConstructorConstraint());
+
         }
-        if (errors.Count > 0) {
-            return errors.ToImmutable();
-        }
-        var typeParameter = method.ConstraintClauses.SelectMany(constraint => constraint.Constraints.Where(y => {
-            var kind = y.Kind();
-            return kind is SyntaxKind.ClassConstraint
-            or SyntaxKind.ConstructorConstraint
-            or SyntaxKind.DefaultConstraint
-            or SyntaxKind.StructConstraint
-            or SyntaxKind.TypeConstraint;
-        })
-        .Select(y => {
-            return y switch {
-                ConstructorConstraintSyntax constructorConstraint => new ConstructorConstraint() as Constraints,
-                DefaultConstraintSyntax constructorConstraint => new DefaultConstraint(),
-                ClassOrStructConstraintSyntax classOrStructConstraintSyntax when classOrStructConstraintSyntax.IsKind(SyntaxKind.StructConstraint) => new StructConstraint(),
-                ClassOrStructConstraintSyntax classOrStructConstraintSyntax when classOrStructConstraintSyntax.IsKind(SyntaxKind.ClassConstraint) => new ClassConstraint(),
-                TypeConstraintSyntax typeConstraint => new TypeConstraint() { Type = GetName(context.SemanticModel.GetTypeInfo(typeConstraint.Type).Type as INamedTypeSymbol ?? throw new NotSupportedException($"Was not able to get type of {typeConstraint}")) },
-                _ => throw new NotImplementedException()
-            };
-        })).ToImmutableList();
+
+        var typeParameter = typeParameterBuilder.ToImmutable();
+
         var typeDeclaration = (TypeDeclarationSyntax)method.Parent!;
         var parent = typeDeclaration;
 
@@ -242,18 +259,37 @@ public class InvokeGenerator : IIncrementalGenerator {
                 Configurations = list,
                 DefinedIn = parent,
                 Namespace = @namespace,
+                Parameters = parameters,
                 ImplementedMethodName = x.Key ?? methodName, // This works since the other method is Generic?
                 IsStactic = method.Modifiers.Any(t => t.IsKind(SyntaxKind.StaticKeyword)),
                 MethodToCall = methodName,
-                IsAsync = isAsync
+                ReturnType = returnType
             };
         }).ToImmutableArray();
         return configurations;
     }
 
-    private static string GetName(INamedTypeSymbol symbol) {
+    private static string GetName(ITypeSymbol symbol) {
+        //if(symbol is INamedTypeSymbol named) {
+
+        //}
         StringBuilder sb = new();
         sb.Append(symbol.ToDisplayString());
         return sb.ToString();
+    }
+
+    private static INamedTypeSymbol SubstituteTypeParameters(INamedTypeSymbol toConstrainTo, ITypeSymbol toSubstitute) {
+        if (toConstrainTo.IsGenericType) {
+            var parameters = toConstrainTo.TypeArguments.ToBuilder();
+            for (int i = 0; i < parameters.Count; i++) {
+                if (SymbolEqualityComparer.Default.Equals(parameters[i], toSubstitute)) {
+                    parameters[i] = toConstrainTo.ConstructedFrom.TypeArguments[i];
+                } else if (parameters[i] is INamedTypeSymbol namedType) {
+                    parameters[i] = SubstituteTypeParameters(namedType, toSubstitute);
+                }
+            }
+            toConstrainTo = toConstrainTo.ConstructedFrom.Construct(parameters.ToImmutable(), toConstrainTo.TypeArguments.Select(x => x.NullableAnnotation).ToImmutableArray());
+        }
+        return toConstrainTo;
     }
 }

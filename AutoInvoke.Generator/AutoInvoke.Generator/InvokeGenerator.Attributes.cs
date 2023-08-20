@@ -24,10 +24,6 @@ internal sealed class FindAndInvokeAttribute : System.Attribute {
 
     }
 
-    public FindAndInvokeAttribute(System.Type type) {
-
-    }
-
     public string MethodName { get; set; }
 
     public bool CallForAbstractClasses { get; set; }

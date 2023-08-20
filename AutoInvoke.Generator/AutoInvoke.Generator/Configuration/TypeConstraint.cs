@@ -6,6 +6,3 @@ using Microsoft.CodeAnalysis;
 
 namespace AutoInvoke.Generator.Configuration;
 
-internal record TypeConstraint : Constraints {
-    public required string Type { get; set; }
-}

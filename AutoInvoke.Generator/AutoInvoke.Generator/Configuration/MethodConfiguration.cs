@@ -12,7 +12,7 @@ namespace AutoInvoke.Generator.Configuration;
 internal record MethodConfiguration {
     public required ImmutableList<RunConfiguration> Configurations { get; set; }
     public required TypeDeclarationSyntax DefinedIn { get; set; }
-    public required string MethodToCall { get; set; }
+    public required IMethodSymbol MethodToCall { get; set; }
     public required string ImplementedMethodName { get; set; }
     public required string Namespace { get; set; }
     public required bool IsStactic { get; set; }

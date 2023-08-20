@@ -4,4 +4,4 @@
 
 namespace AutoInvoke.Generator.Configuration;
 
-internal record ConstructorConstraint : Constraints { }
+//internal record ConstructorConstraint : Constraints { }

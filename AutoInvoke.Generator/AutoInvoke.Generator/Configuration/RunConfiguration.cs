@@ -7,7 +7,7 @@ using System.Collections.Immutable;
 namespace AutoInvoke.Generator.Configuration;
 
 internal record RunConfiguration {
-    public required ImmutableList<Constraints> TypesToHandle { get; set; }
+    public required ImmutableList<RegexConstraint> TypesToHandle { get; set; }
     public bool CallForAbstractClasses { get; set; } = false;
     public bool CallForInterfaces { get; set; } = false;
     public bool CallForStructs { get; set; } = true;

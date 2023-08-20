@@ -89,7 +89,7 @@ partial class FileHandler {
 - If the return type is not `void` the generated methods returntype is an array of the return type of the attributed method
 
 ### Limitations
-- Only one Typeparameter is supported you can't do somthing like `Foo<T1,T2>() where T1: IComparable<T2>`
+- When using multiple Type Parameters, one Type Parameter must contain all others (transitiv) like `Foo<T1, T2, T3>() where T1: IComparable<T2> where T2 : IComparable<T3>`
 - You can't call static Types. Generics do not allow this.
 
 

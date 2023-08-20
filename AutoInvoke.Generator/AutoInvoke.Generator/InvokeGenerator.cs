@@ -17,12 +17,15 @@ using System.Xml.Linq;
 using System.Net.Mime;
 using AnyOfTypes;
 using AutoInvoke.Generator.SourceCodeWriter;
+using System.Security.Cryptography.X509Certificates;
+using System.Runtime.CompilerServices;
+using System.Linq;
 
 namespace AutoInvoke.Generator;
 
 [Generator(LanguageNames.CSharp)]
 public class InvokeGenerator : IIncrementalGenerator {
-    private static readonly DiagnosticDescriptor IG0004 = new DiagnosticDescriptor("IG0004", "Parameter Type not supported", "The parameter must be of a named type", "Design", DiagnosticSeverity.Error, true);
+    private static readonly DiagnosticDescriptor IG0001 = new DiagnosticDescriptor("IG0001", "A Single Type can't satisfy all constrints", "One Type Parameter must contain all others, otherwise a singele Type will not Satisfy all Constrains", "Design", DiagnosticSeverity.Error, true);
     public void Initialize(IncrementalGeneratorInitializationContext context) {
         var fullQualifiedAttribute = typeof(FindAndInvokeAttribute).FullName!;
 
@@ -33,7 +36,7 @@ public class InvokeGenerator : IIncrementalGenerator {
                 node.IsKind(SyntaxKind.MethodDeclaration)
                     && node is MethodDeclarationSyntax methodDeclatation
                     && methodDeclatation.Parent is TypeDeclarationSyntax,
-            (context, cancel) => Transform(context));
+            Transform);
 
         var diagnostics = methodsAndDiagnostics.Where(x => x.IsSecond).SelectMany((x, cancel) => x.Second);
 
@@ -41,72 +44,50 @@ public class InvokeGenerator : IIncrementalGenerator {
 
         var methodsToHandle = methodsAndDiagnostics.Where(x => x.IsFirst).SelectMany((x, canel) => x.First);
 
-        var typeFilters = methodsToHandle.Select((x, cancel) => (x.ImplementedMethodName, x.Configurations)).Collect();
+        var typeFilters = methodsToHandle.Select((x, cancel) => (x.ImplementedMethodName, x.MethodToCall, x.Configurations)).Collect();
 
         var typeInfo = context.SyntaxProvider.CreateSyntaxProvider((node, cancel) => node is BaseTypeDeclarationSyntax, (context, cancel) => {
             var syntax = (BaseTypeDeclarationSyntax)context.Node;
 
             if (context.SemanticModel.GetDeclaredSymbol(context.Node, cancellationToken: cancel) is not INamedTypeSymbol symbol) {
-                return default;
+                return default!;// we check for nall later…
             }
-            var baseTypeBuilder = ImmutableArray.CreateBuilder<string>();
-            {
-                var current = symbol.BaseType;
-                while (current is not null) {
-                    baseTypeBuilder.Add(GetName(current));
-                    current = current.BaseType;
-                }
-            }
-            var name = GetName(symbol);
-
-            var baseTypes = baseTypeBuilder.ToImmutableHashSet();
-            var interfaces = symbol.AllInterfaces
-            .Select(x => SubstituteTypeParameters(x, symbol))
-            .Select(GetName)
-            .ToImmutableHashSet();
-
-            var isStatic = symbol.IsStatic;
-            var isAbstract = symbol.IsAbstract;
-            var isStruct = symbol.IsValueType;
-            var isClass = symbol.IsReferenceType;
-            var isRecord = symbol.IsRecord;
-            var hasParameterlessConstructor = isStruct || ((isClass || isRecord) && symbol.Constructors.Length == 0 || symbol.Constructors.Any(x => x.Parameters.Length == 0));
-            var isInterface = syntax is InterfaceDeclarationSyntax;
-            return (name, isStatic, isAbstract, isStruct, isClass, isRecord, isInterface, hasParameterlessConstructor, baseTypes, interfaces);
-        }).Where(x => x.name is not null && !x.isStatic);
+            return symbol;
+        }).Where(x => x is not null && !x.IsStatic);
 
         var typesToHandle = typeInfo.Combine(typeFilters).Select((input, cancel) => {
-            var ((name, isStatic, isAbstract, isStruct, isClass, isRecord, isInterface, hasParameterlessConstructor, baseTypes, interfaces), filters) = input;
-            var matchingTransformers = filters.Where(filter =>
-                filter.Configurations.Any(configuration => {
-                    return ((configuration.CallForInterfaces
-                             && isInterface)
-                            || (configuration.CallForStructs && isStruct)
-                            || ((configuration.CallForAbstractClasses == true || isAbstract == false)
-                                && (
-                                    (configuration.CallForClasses && isClass)
-                                    || (configuration.CallForRecords && isRecord)
-                                )))
-                                && configuration.TypesToHandle.All(condition => {
-                                    return condition switch {
-                                        ConstructorConstraint => hasParameterlessConstructor,
-                                        TypeConstraint typeConstraint => name == typeConstraint.Type || interfaces.Contains(typeConstraint.Type) || baseTypes.Contains(typeConstraint.Type),
-                                        ClassConstraint => isClass,
-                                        StructConstraint => isStruct,
-                                        RegexConstraint regex => Regex.IsMatch(name, regex.Pattern),
-                                        _ => throw new NotImplementedException($"{condition} is not implemented")
-                                    };
-                                });
-                })
+            var (symbol, filters) = input;
+            var matchingTransformers = filters
+            .SelectMany(filter =>
+                Satisys(filter.MethodToCall, symbol).Select(x =>
+                (filter.MethodToCall, filter.ImplementedMethodName, filter.Configurations, TypeParameters: x)
+                )
+            )
+
+            .Where(filter =>
+                 filter.Configurations.Any(configuration => {
+
+                     return ((configuration.CallForInterfaces
+                              && symbol.TypeKind == TypeKind.Interface)
+                             || (configuration.CallForStructs && symbol.TypeKind == TypeKind.Struct)
+                             || ((configuration.CallForAbstractClasses == true || symbol.IsAbstract == false)
+                                 && (
+                                     (configuration.CallForClasses && symbol.TypeKind == TypeKind.Class)
+                                     || (configuration.CallForRecords && symbol.IsRecord)
+                                 )))
+                                 && configuration.TypesToHandle.All(condition => {
+                                     return Regex.IsMatch(symbol.Name, condition.Pattern);
+                                 });
+                 })
             ).ToImmutableArray();
-            return (matchingTransformers, typeName: name);
+            return (matchingTransformers, typeName: symbol.ToDisplayString());
         }).Where(x => x.matchingTransformers.Length > 0).Collect();
 
         var data = methodsToHandle.Combine(typesToHandle)
             .Select((input, cancel) => {
                 var (method, types) = input;
-                var correctTypes = types.Where(x => x.matchingTransformers.Any(x => x.ImplementedMethodName == method.ImplementedMethodName));
-                return (method, types: correctTypes.Select(x => x.typeName).ToImmutableArray());
+                var correctTypes = types.Select(x => (type: x, transformer: x.matchingTransformers.Where(x => x.ImplementedMethodName == method.ImplementedMethodName).ToArray()));
+                return (method, types: correctTypes.SelectMany(x => x.transformer.Select(y => y.TypeParameters.Select(x => x.ToDisplayString()).ToArray())).ToImmutableArray());
             });
 
         var langVersion = context.ParseOptionsProvider.Select((x, cancel) => ((CSharpParseOptions)x).LanguageVersion);
@@ -125,13 +106,13 @@ public class InvokeGenerator : IIncrementalGenerator {
                 w.WriteMethodBlock(SourceCodeWriterExtensions.Visibility.Private, method.ImplementedMethodName, method.IsStactic, false, method.Parameters.Select(x => (GetName(x.Type), x.Name)), returnType, w => {
                     if (method.ReturnType is null) {
                         foreach (var type in types) {
-                            w.WriteLine($"{method.MethodToCall}<{type}>({string.Join(", ", method.Parameters.Select(x => x.Name))});");
+                            w.WriteLine($"{method.MethodToCall.Name}<{string.Join(", ", type)}>({string.Join(", ", method.Parameters.Select(x => x.Name))});");
                         }
                     } else {
 
                         w.WriteLine(w => {
                             w.Write("return new []{");
-                            w.Write(string.Join(", ", types.Select(type => $"{method.MethodToCall}<{type}>({string.Join(", ", method.Parameters.Select(x => x.Name))})")));
+                            w.Write(string.Join(", ", types.Select(type => $"{method.MethodToCall.Name}<{string.Join(", ", type)}>({string.Join(", ", method.Parameters.Select(x => x.Name))})")));
                             w.Write("};");
                         });
                     }
@@ -142,7 +123,7 @@ public class InvokeGenerator : IIncrementalGenerator {
         });
     }
 
-    private static AnyOf<ImmutableArray<MethodConfiguration>, ImmutableArray<Diagnostic>> Transform(GeneratorAttributeSyntaxContext context) {
+    private static AnyOf<ImmutableArray<MethodConfiguration>, ImmutableArray<Diagnostic>> Transform(GeneratorAttributeSyntaxContext context, CancellationToken cancellation) {
         var method = (MethodDeclarationSyntax)context.TargetNode;
 
         var stringTypeInfo = context.SemanticModel.Compilation.GetTypeByMetadataName("System.String");
@@ -153,54 +134,36 @@ public class InvokeGenerator : IIncrementalGenerator {
         var methodName = method.Identifier.Text;
         var returnType = !((method.ReturnType as PredefinedTypeSyntax)?.Keyword.Text == "void") ? method.ReturnType : null;
 
-        var errors = ImmutableArray.CreateBuilder<Diagnostic>();
-        //if (isAsync) {
-        //    //check if it is actually a Task
-        //    if (context.SemanticModel.GetTypeInfo(method.ReturnType).Type is not INamedTypeSymbol propablyTaskSymbol
-        //    || !SymbolEqualityComparer.Default.Equals(taskTypeInfo, propablyTaskSymbol)) {
-        //        errors.Add(Diagnostic.Create(IG0001, Location.Create(method.SyntaxTree, method.ReturnType.Span)));
-        //    }
-        //}
-        //if (method.ParameterList.Parameters.Count > 0) {
-        //    errors.Add(Diagnostic.Create(IG0002, Location.Create(method.SyntaxTree, method.ParameterList.Span)));
-        //}
-        //if (method.TypeParameterList?.Parameters.Count != 1) {
-        //    errors.Add(Diagnostic.Create(IG0003, Location.Create(method.SyntaxTree, (method.TypeParameterList?.Span ?? new Microsoft.CodeAnalysis.Text.TextSpan(method.Identifier.Span.Start, method.ParameterList.Span.End - method.Identifier.Span.Start)))));
-        //}
-
         var methodSymbol = context.TargetSymbol as IMethodSymbol ?? throw new NotSupportedException();
-
-       
-
-        //if (errors.Count > 0) {
-        //    return errors.ToImmutable();
-        //}
 
         var parameters = methodSymbol.Parameters;
 
-        var typeParameterBuilder = ImmutableList.CreateBuilder<Constraints>();
 
-        ITypeParameterSymbol typeParameterSymbol = methodSymbol.TypeParameters[0]; // we currently support only one
-        typeParameterBuilder.AddRange(typeParameterSymbol.ConstraintTypes.Select(x => {
-            INamedTypeSymbol toConstrainTo = (INamedTypeSymbol)x;
-            var toSubstitute = typeParameterSymbol.OriginalDefinition;
-            toConstrainTo = SubstituteTypeParameters(toConstrainTo, toSubstitute);
-            return new TypeConstraint() { Type = GetName(toConstrainTo) };
+        {
+            ITypeParameterSymbol? typeParameterToImplement;
+            if (methodSymbol.TypeParameters.Length == 1) {
+                // if it is only one parameter, it can be a concrete type or a self referencing type  there are no other TypeParameter that are independent
+                typeParameterToImplement = methodSymbol.TypeParameters[0];
+            } else {
+                // We need to find one type parameter, that is dependend on all other TypeParameters.
+                // We may not have two Type parameters that are independent of each other
+                // like `where T1 : string where T2 : int`.
+                // What is allowed is `where T1 : Foo<T2> where T2 : INumber`
+                typeParameterToImplement = methodSymbol.TypeParameters
+                    .Where(x => GetAllReferencedTypeParameter(x).Distinct(SymbolEqualityComparer.Default).Count() == methodSymbol.TypeParameters.Length).FirstOrDefault();
 
-        }));
+            }
 
-        if (typeParameterSymbol.HasReferenceTypeConstraint) {
-            typeParameterBuilder.Add(new ClassConstraint());
+            if (typeParameterToImplement is null) {
+
+                return methodSymbol.DeclaringSyntaxReferences
+                    .Cast<SyntaxReference>()
+                    .Select(x => x.GetSyntax(cancellation))
+                    .Cast<MethodDeclarationSyntax>()
+                    .Select(x => Diagnostic.Create(IG0001, Location.Create(x.SyntaxTree, x.TypeParameterList?.Span ?? x.Span)))
+                    .ToImmutableArray();
+            }
         }
-        if (typeParameterSymbol.HasValueTypeConstraint) {
-            typeParameterBuilder.Add(new StructConstraint());
-        }
-        if (typeParameterSymbol.HasConstructorConstraint) {
-            typeParameterBuilder.Add(new ConstructorConstraint());
-
-        }
-
-        var typeParameter = typeParameterBuilder.ToImmutable();
 
         var typeDeclaration = (TypeDeclarationSyntax)method.Parent!;
         var parent = typeDeclaration;
@@ -224,11 +187,9 @@ public class InvokeGenerator : IIncrementalGenerator {
         var configurations = context.Attributes.Select(x => {
             RunConfiguration configuration;
             if (x.ConstructorArguments.Length == 0) {
-                configuration = new RunConfiguration() { TypesToHandle = typeParameter };
-            } else if (SymbolEqualityComparer.Default.Equals(x.ConstructorArguments[0].Type, typeTypeInfo)) {
-                configuration = new RunConfiguration() { TypesToHandle = typeParameter.Add(new TypeConstraint() { Type = GetName(x.ConstructorArguments[0].Value as INamedTypeSymbol ?? throw new NotSupportedException("Pattern must not be null")) }) };
+                configuration = new RunConfiguration() { TypesToHandle = ImmutableList.Create<RegexConstraint>() };
             } else if (SymbolEqualityComparer.Default.Equals(x.ConstructorArguments[0].Type, stringTypeInfo)) {
-                configuration = new RunConfiguration() { TypesToHandle = typeParameter.Add(new RegexConstraint() { Pattern = x.ConstructorArguments[0].Value as string ?? throw new NotSupportedException("Pattern must not be null") }) };
+                configuration = new RunConfiguration() { TypesToHandle = ImmutableList.Create(new RegexConstraint() { Pattern = x.ConstructorArguments[0].Value as string ?? throw new NotSupportedException("Pattern must not be null") }) };
             } else {
                 throw new NotImplementedException();
             }
@@ -252,7 +213,7 @@ public class InvokeGenerator : IIncrementalGenerator {
             var methodName = x.NamedArguments.FirstOrDefault(named => named.Key == nameof(FindAndInvokeAttribute.MethodName)).Value is TypedConstant methodNameConst && methodNameConst.Value is string methodName2
                 ? methodName2
                 : null;
-            return (configuration: configuration, methodName: methodName);
+            return (configuration, methodName);
         }).GroupBy(x => x.methodName).Select(x => {
             var list = x.Select(x => x.configuration).ToImmutableList();
             return new MethodConfiguration() {
@@ -262,7 +223,7 @@ public class InvokeGenerator : IIncrementalGenerator {
                 Parameters = parameters,
                 ImplementedMethodName = x.Key ?? methodName, // This works since the other method is Generic?
                 IsStactic = method.Modifiers.Any(t => t.IsKind(SyntaxKind.StaticKeyword)),
-                MethodToCall = methodName,
+                MethodToCall = methodSymbol,
                 ReturnType = returnType
             };
         }).ToImmutableArray();
@@ -270,9 +231,6 @@ public class InvokeGenerator : IIncrementalGenerator {
     }
 
     private static string GetName(ITypeSymbol symbol) {
-        //if(symbol is INamedTypeSymbol named) {
-
-        //}
         StringBuilder sb = new();
         sb.Append(symbol.ToDisplayString());
         return sb.ToString();
@@ -291,5 +249,184 @@ public class InvokeGenerator : IIncrementalGenerator {
             toConstrainTo = toConstrainTo.ConstructedFrom.Construct(parameters.ToImmutable(), toConstrainTo.TypeArguments.Select(x => x.NullableAnnotation).ToImmutableArray());
         }
         return toConstrainTo;
+    }
+
+
+    private static ImmutableArray<ImmutableArray<ITypeSymbol>> Satisys(IMethodSymbol methodSymbol, INamedTypeSymbol type) {
+
+        if (type.IsGenericType) {
+            return ImmutableArray<ImmutableArray<ITypeSymbol>>.Empty; // We only support concrete implementations
+        }
+
+        ITypeParameterSymbol? typeParameterToImplement;
+        if (methodSymbol.TypeParameters.Length == 1) {
+            // if it is only one parameter, it can be a concrete type or a self referencing type  there are no other TypeParameter that are independent
+            typeParameterToImplement = methodSymbol.TypeParameters[0];
+        } else {
+            // We need to find one type parameter, that is dependend on all other TypeParameters.
+            // We may not have two Type parameters that are independent of each other
+            // like `where T1 : string where T2 : int`.
+            // What is allowed is `where T1 : Foo<T2> where T2 : INumber`
+            typeParameterToImplement = methodSymbol.TypeParameters
+                .Where(x => GetAllReferencedTypeParameter(x).Distinct(SymbolEqualityComparer.Default).Count() == methodSymbol.TypeParameters.Length).FirstOrDefault();
+
+        }
+
+        if (typeParameterToImplement is null) {
+            return ImmutableArray<ImmutableArray<ITypeSymbol>>.Empty;
+        }
+
+        // We do not need to check other Type Parameters explicitly, since Type parameter already contains every other
+        var allValidParameters = CheckTypeConsraint(typeParameterToImplement, type, TypeConstraintResultTree.CreateRoot().ToList(), true);
+
+        // check if all TypeParameters were assingend
+        return allValidParameters.Select(x =>
+
+            methodSymbol.TypeParameters
+            .Select(typeParameter => x.TypeMapping.GetValueOrDefault(typeParameter)).OfType<ITypeSymbol>().ToImmutableArray())
+            .Where(x => x.Length == methodSymbol.TypeParameters.Length)
+            .ToImmutableArray();
+
+        ImmutableArray<TypeConstraintResultTree> CheckTypeConsraint(ITypeSymbol constraint, ITypeSymbol checkAgainst, ImmutableArray<TypeConstraintResultTree> tree, bool firstCall = false, ITypeParameterSymbol? currentTypeConstraint = null) {
+
+            if (!tree.Any()) {
+                return tree.AddTrue();
+            }
+
+            if (checkAgainst is INamedTypeSymbol namedCheckAgainst && constraint is INamedTypeSymbol namedConstraint) {
+                // check if the types are equal ignoring type parameters
+                var exactCheck = CheckAgainstExactType(tree, namedCheckAgainst, namedConstraint).AddChild((currentTypeConstraint, checkAgainst));
+                if (exactCheck.Length != 0) {
+                    return exactCheck;
+                }
+
+                if (namedConstraint.TypeKind != TypeKind.Interface) {
+
+                    // the type dose not match, we check the base types, is one matches, we are good
+                    var currentBaseType = namedCheckAgainst;
+                    while ((currentBaseType = currentBaseType?.BaseType) is not null) {
+                        // we may not call CheckTypeConstraint, since then we would check interfactes multiple Times
+                        var result = CheckAgainstExactType(tree, currentBaseType, namedConstraint);
+                        if (result.Any()) {
+                            // we check againtst a concrete typeConstraint, if TypeConstraint is class it can't be an interface so we do not need check interfaces.
+                            return result.AddChild((currentTypeConstraint, namedCheckAgainst));
+                        }
+                    }
+                    return tree.AddFalse();
+                } else {
+
+                    // if that did not work check if there is an interface implementation
+                    return namedCheckAgainst.AllInterfaces.Select(@interface => CheckTypeConsraint(constraint, @interface, tree))
+                        .SelectMany(x => x)
+                        .AddChild((currentTypeConstraint, checkAgainst)); // If none matched the list will be empty so none is set true
+                }
+
+                ImmutableArray<TypeConstraintResultTree> CheckAgainstExactType(ImmutableArray<TypeConstraintResultTree> tree, INamedTypeSymbol namedCheckAgainst, INamedTypeSymbol namedConstraint) {
+                    if (!SymbolEqualityComparer.Default.Equals(GeneralizeGeneric(namedConstraint), GeneralizeGeneric(namedCheckAgainst))) {
+                        return tree.AddFalse();
+                    }
+                    // if it is geneirc also check type parameters
+                    if (namedConstraint.IsGenericType) {
+                        // I think this is not nessesarry since two "identical" types with different number of arguments have differend Unbound typest
+                        // TODO: Check this.
+                        if (namedConstraint.TypeArguments.Length != namedCheckAgainst.TypeArguments.Length) {
+                            return tree.AddFalse();
+                        }
+
+                        //check all generic parameters
+                        // every TypeParameter must be valid, so chaining the different nodes in a long linek
+                        var subTree = tree;
+                        for (global::System.Int32 i = 0; i < namedConstraint.TypeArguments.Length; i++) {
+                            subTree = CheckTypeConsraint(namedConstraint.TypeArguments[i], namedCheckAgainst.TypeArguments[i], subTree);
+                            if (!subTree.Any()) {
+                                break; // we can stop if subTree has no valid 
+                            }
+                        }
+                        return subTree;
+                    }
+                    return tree.AddTrue();
+                }
+
+            } else if (constraint is ITypeParameterSymbol typeParameterConstraint) {
+
+                // to support recursive TypeParameter, we need to replace every occurance of
+                // typeParameterToImplement with type (expcept for the initial)
+
+                if (!firstCall && SymbolEqualityComparer.Default.Equals(typeParameterConstraint, typeParameterToImplement)) {
+                    return CheckTypeConsraint(type, checkAgainst, tree).AddTrue();
+                }
+
+                if (typeParameterConstraint.HasConstructorConstraint && (
+                    checkAgainst is not INamedTypeSymbol namedCheckAgainst2
+                    || namedCheckAgainst2.IsAbstract
+                    || !namedCheckAgainst2.Constructors.Where(x => !x.IsStatic && x.Parameters.Length == 0).Any()
+                    )) {
+                    return tree.AddFalse(); // dose not satisfy constructor constraint
+                }
+                if (typeParameterConstraint.HasNotNullConstraint && checkAgainst.NullableAnnotation == NullableAnnotation.Annotated) {
+                    return tree.AddFalse();
+                }
+                if (typeParameterConstraint.HasReferenceTypeConstraint && !checkAgainst.IsReferenceType) {
+                    return tree.AddFalse();
+                }
+                if (typeParameterConstraint.HasUnmanagedTypeConstraint && !checkAgainst.IsUnmanagedType) {
+                    return tree.AddFalse();
+                }
+                if (typeParameterConstraint.HasValueTypeConstraint && !checkAgainst.IsValueType) {
+                    return tree.AddFalse();
+                }
+                if (typeParameterConstraint.ConstraintTypes.Length == 0) {
+                    return tree.AddChild((typeParameterConstraint, checkAgainst));
+                } else {
+
+                    var subTree = tree;
+                    foreach (var typeConstraint in typeParameterConstraint.ConstraintTypes) {
+                        subTree = CheckTypeConsraint(typeConstraint, checkAgainst, subTree, currentTypeConstraint: typeParameterConstraint);
+                        if (subTree.Length == 0) {
+                            break;
+                        }
+                    }
+                    return subTree;
+                }
+
+            } else if (constraint is IArrayTypeSymbol arrayConstraint && checkAgainst is IArrayTypeSymbol arrayCheckedAgainst) {
+                return CheckTypeConsraint(arrayConstraint.ElementType, arrayCheckedAgainst.ElementType, tree).AddChild((currentTypeConstraint, checkAgainst));
+            } else if (constraint is IDynamicTypeSymbol dynamicConstraint && checkAgainst is IDynamicTypeSymbol dynamicCheckedAgainst) {
+                return tree.AddChild((currentTypeConstraint, checkAgainst));
+            } else if (constraint is IFunctionPointerTypeSymbol functionPointerConstraint && checkAgainst is IFunctionPointerTypeSymbol functionPointerCheckedAgainst) {
+                return SymbolEqualityComparer.Default.Equals(functionPointerConstraint.Signature, functionPointerCheckedAgainst.Signature) ? tree.AddChild((currentTypeConstraint, checkAgainst)) : tree.AddFalse();
+            } else if (constraint is IPointerTypeSymbol pointerConstraint && checkAgainst is IPointerTypeSymbol pointerCheckedAgainst) {
+                return CheckTypeConsraint(pointerConstraint.PointedAtType, pointerCheckedAgainst.PointedAtType, tree).AddChild((currentTypeConstraint, checkAgainst));
+            } else {
+                return tree.AddFalse();
+            }
+
+        }
+
+
+
+        T GeneralizeGeneric<T>(T symbol) where T : ITypeSymbol {
+            if (symbol is INamedTypeSymbol namedSymbol && namedSymbol.IsGenericType) {
+                return (T)namedSymbol.ConstructUnboundGenericType(); // If symbol is INamedTypeSymbol then INamedTypeSymbol can be assingend to T
+
+            }
+            return symbol;
+        }
+
+    }
+    private static IEnumerable<ITypeParameterSymbol> GetAllReferencedTypeParameter(ITypeSymbol symbol) {
+        if (symbol is INamedTypeSymbol namedTypeSymbol) {
+            return namedTypeSymbol.TypeArguments.OfType<ITypeParameterSymbol>();
+        } else if (symbol is IArrayTypeSymbol arrayTypeSymbol) {
+            return GetAllReferencedTypeParameter(arrayTypeSymbol.ElementType);
+        } else if (symbol is ITypeParameterSymbol typeParameterSymbol) {
+            return typeParameterSymbol.ConstraintTypes.SelectMany(GetAllReferencedTypeParameter).Concat(Enumerable.Repeat(typeParameterSymbol, 1));
+            //} else if (symbol is IPointerTypeSymbol pointerTypeSymbol) {
+            //} else if (symbol is IDynamicTypeSymbol dynamicTypeSymbol) {
+            //} else if (symbol is IErrorTypeSymbol errorTypeSymbol) {
+            //} else if (symbol is IFunctionPointerTypeSymbol functionPointerTypeSymbol) {
+        } else {
+            return Enumerable.Empty<ITypeParameterSymbol>();
+        }
     }
 }

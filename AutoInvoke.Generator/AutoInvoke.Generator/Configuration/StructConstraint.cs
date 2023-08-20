@@ -3,5 +3,3 @@
 // See the LICENSE file in the project root for more information.
 
 namespace AutoInvoke.Generator.Configuration;
-
-internal record StructConstraint : Constraints { }

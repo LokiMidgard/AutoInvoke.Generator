@@ -4,4 +4,3 @@
 
 namespace AutoInvoke.Generator.Configuration;
 
-internal record ClassConstraint : Constraints { }

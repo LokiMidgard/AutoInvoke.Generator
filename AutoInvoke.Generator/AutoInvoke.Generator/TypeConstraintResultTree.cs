@@ -25,10 +25,10 @@ internal class TypeConstraintResultTree {
         Parent = parent;
 
         // succsess is true unless we find a conflicting TypeMapping
-        Succsess = initalSuccsess;
+        Succsess = initalSuccsess && (Parent?.Succsess ?? true);
         if (Parent is not null && Succsess) {
             foreach (var key in typeMapping.Keys) {
-                if (this.Parent.TypeMapping.TryGetKey(key, out var other)) {
+                if (this.Parent.TypeMapping.TryGetValue(key, out var other)) {
                     if (!SymbolEqualityComparer.Default.Equals(other, typeMapping[key])) {
                         Succsess = false; break;
                     }

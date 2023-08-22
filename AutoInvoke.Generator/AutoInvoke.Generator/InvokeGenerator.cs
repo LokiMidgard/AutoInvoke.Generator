@@ -74,7 +74,7 @@ public class InvokeGenerator : IIncrementalGenerator {
             .Combine(scanExternalAssemblys)
             .Select((input, cancel) => input.Right ? input.Left : null!)
             .Where(x => x is not null);
-            ;
+        ;
 
 
 
@@ -353,12 +353,13 @@ public class InvokeGenerator : IIncrementalGenerator {
         var allValidParameters = CheckTypeConsraint(typeParameterToImplement, type, TypeConstraintResultTree.CreateRoot().ToList(), true);
 
         // check if all TypeParameters were assingend
-        return allValidParameters.Select(x =>
+        ImmutableArray<ImmutableArray<ITypeSymbol>> immutableArray = allValidParameters.Select(x =>
 
-            methodSymbol.TypeParameters
-            .Select(typeParameter => x.TypeMapping.GetValueOrDefault(typeParameter)).OfType<ITypeSymbol>().ToImmutableArray())
-            .Where(x => x.Length == methodSymbol.TypeParameters.Length)
-            .ToImmutableArray();
+                    methodSymbol.TypeParameters
+                    .Select(typeParameter => x.TypeMapping.GetValueOrDefault(typeParameter)).OfType<ITypeSymbol>().ToImmutableArray())
+                    .Where(x => x.Length == methodSymbol.TypeParameters.Length)
+                    .ToImmutableArray();
+        return immutableArray;
 
         ImmutableArray<TypeConstraintResultTree> CheckTypeConsraint(ITypeSymbol constraint, ITypeSymbol checkAgainst, ImmutableArray<TypeConstraintResultTree> tree, bool firstCall = false, ITypeParameterSymbol? currentTypeConstraint = null) {
 
@@ -386,12 +387,14 @@ public class InvokeGenerator : IIncrementalGenerator {
                         }
                     }
                     return tree.AddFalse();
-                } else {
+                } else if (checkAgainst.TypeKind != TypeKind.Interface) {
 
                     // if that did not work check if there is an interface implementation
                     return namedCheckAgainst.AllInterfaces.Select(@interface => CheckTypeConsraint(constraint, @interface, tree))
                         .SelectMany(x => x)
                         .AddChild((currentTypeConstraint, checkAgainst)); // If none matched the list will be empty so none is set true
+                } else {
+                    return ImmutableArray<TypeConstraintResultTree>.Empty;
                 }
 
                 ImmutableArray<TypeConstraintResultTree> CheckAgainstExactType(ImmutableArray<TypeConstraintResultTree> tree, INamedTypeSymbol namedCheckAgainst, INamedTypeSymbol namedConstraint) {
@@ -425,42 +428,64 @@ public class InvokeGenerator : IIncrementalGenerator {
                 // to support recursive TypeParameter, we need to replace every occurance of
                 // typeParameterToImplement with type (expcept for the initial)
 
-                if (!firstCall && SymbolEqualityComparer.Default.Equals(typeParameterConstraint, typeParameterToImplement)) {
-                    return CheckTypeConsraint(type, checkAgainst, tree).AddTrue();
-                }
 
-                if (typeParameterConstraint.HasConstructorConstraint && (
-                    checkAgainst is not INamedTypeSymbol namedCheckAgainst2
-                    || namedCheckAgainst2.IsAbstract
-                    || !namedCheckAgainst2.Constructors.Where(x => !x.IsStatic && x.Parameters.Length == 0).Any()
-                    )) {
-                    return tree.AddFalse(); // dose not satisfy constructor constraint
-                }
-                if (typeParameterConstraint.HasNotNullConstraint && checkAgainst.NullableAnnotation == NullableAnnotation.Annotated) {
-                    return tree.AddFalse();
-                }
-                if (typeParameterConstraint.HasReferenceTypeConstraint && !checkAgainst.IsReferenceType) {
-                    return tree.AddFalse();
-                }
-                if (typeParameterConstraint.HasUnmanagedTypeConstraint && !checkAgainst.IsUnmanagedType) {
-                    return tree.AddFalse();
-                }
-                if (typeParameterConstraint.HasValueTypeConstraint && !checkAgainst.IsValueType) {
-                    return tree.AddFalse();
-                }
-                if (typeParameterConstraint.ConstraintTypes.Length == 0) {
-                    return tree.AddChild((typeParameterConstraint, checkAgainst));
-                } else {
+                var differentMappings = tree.GroupBy(x => x.TypeMapping.ContainsKey(typeParameterConstraint));
 
-                    var subTree = tree;
-                    foreach (var typeConstraint in typeParameterConstraint.ConstraintTypes) {
-                        subTree = CheckTypeConsraint(typeConstraint, checkAgainst, subTree, currentTypeConstraint: typeParameterConstraint);
-                        if (subTree.Length == 0) {
-                            break;
+
+                tree = differentMappings.SelectMany(mapping => {
+                    if (mapping.Key) {
+
+                        return mapping.GroupBy(s => s.TypeMapping[typeParameterConstraint], SymbolEqualityComparer.Default)
+                        .SelectMany(x => CheckTypeConsraint((ITypeSymbol)x.Key!, checkAgainst, x.AddTrue())).Where(x=>x.Succsess);
+
+                        //CheckTypeConsraint(s.TypeMapping[typeParameterConstraint], checkAgainst, mapping.AddTrue());
+                        //return mapping.Select(s => SymbolEqualityComparer.Default.Equals(s.TypeMapping[typeParameterConstraint], checkAgainst) ? s.AddTrue() : s.AddFalse()).Where(x => x.Succsess);
+                    } else {
+                        var tree = mapping.AddChild((typeParameterConstraint, checkAgainst));
+
+
+                        //if (!firstCall && SymbolEqualityComparer.Default.Equals(typeParameterConstraint, typeParameterToImplement)) {
+                        //    return CheckTypeConsraint(type, checkAgainst, tree).AddTrue();
+                        //}
+
+                        if (typeParameterConstraint.HasConstructorConstraint && (
+                            checkAgainst is not INamedTypeSymbol namedCheckAgainst2
+                            || namedCheckAgainst2.IsAbstract
+                            || !namedCheckAgainst2.Constructors.Where(x => !x.IsStatic && x.Parameters.Length == 0).Any()
+                            )) {
+                            return tree.AddFalse(); // dose not satisfy constructor constraint
                         }
+                        if (typeParameterConstraint.HasNotNullConstraint && checkAgainst.NullableAnnotation == NullableAnnotation.Annotated) {
+                            return tree.AddFalse();
+                        }
+                        if (typeParameterConstraint.HasReferenceTypeConstraint && !checkAgainst.IsReferenceType) {
+                            return tree.AddFalse();
+                        }
+                        if (typeParameterConstraint.HasUnmanagedTypeConstraint && !checkAgainst.IsUnmanagedType) {
+                            return tree.AddFalse();
+                        }
+                        if (typeParameterConstraint.HasValueTypeConstraint && !checkAgainst.IsValueType) {
+                            return tree.AddFalse();
+                        }
+                        if (typeParameterConstraint.ConstraintTypes.Length == 0) {
+                            return tree.AddChild((typeParameterConstraint, checkAgainst));
+                        } else {
+
+                            var subTree = tree;
+                            foreach (var typeConstraint in typeParameterConstraint.ConstraintTypes) {
+                                subTree = CheckTypeConsraint(typeConstraint, checkAgainst, subTree, currentTypeConstraint: typeParameterConstraint);
+                                if (subTree.Length == 0) {
+                                    break;
+                                }
+                            }
+                            return subTree;
+                        }
+
                     }
-                    return subTree;
-                }
+                }).AddTrue();
+
+                return tree;
+            
 
             } else if (constraint is IArrayTypeSymbol arrayConstraint && checkAgainst is IArrayTypeSymbol arrayCheckedAgainst) {
                 return CheckTypeConsraint(arrayConstraint.ElementType, arrayCheckedAgainst.ElementType, tree).AddChild((currentTypeConstraint, checkAgainst));

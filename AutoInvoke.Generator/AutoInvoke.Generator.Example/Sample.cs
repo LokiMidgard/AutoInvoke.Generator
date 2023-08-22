@@ -20,6 +20,11 @@ internal partial class FileHandler {
     public void LoadLoaders<T>() where T : IFileLoder<string> {
         this.loaders.Add(T.FileExtension, T.Init);
     }
+
+    [AutoInvoke.FindAndInvoke]
+    public void LoadLoaders2<T1,T2>() where T1 : IComparable<T2>{
+        
+    }
 }
 
 /// <summary>

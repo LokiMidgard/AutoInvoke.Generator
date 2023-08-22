@@ -83,7 +83,7 @@ partial class FileHandler {
 ## Featurs and limitations
 
 - You can control wich type of types shold get called. E.g. by
-  defaurd no calls are generated for abstract classes. But you can overide this setting
+  default no calls are generated for abstract classes or types defined in referenced Assemblys. But you can overide this setting
 - The anotated method can be static
 - If the anotated method has parameters the generated method has the same parametrs
 - If the return type is not `void` the generated methods returntype is an array of the return type of the attributed method

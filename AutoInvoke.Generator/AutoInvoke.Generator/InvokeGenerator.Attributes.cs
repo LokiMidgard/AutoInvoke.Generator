@@ -24,8 +24,8 @@ internal sealed class FindAndInvokeAttribute : System.Attribute {
 
     }
 
+    public bool ScanExternalAssamblies { get; set; }
     public string MethodName { get; set; }
-
     public bool CallForAbstractClasses { get; set; }
     public bool CallForInterfaces { get; set; }
     public bool CallForStructs { get; set; }

@@ -29,6 +29,8 @@ public class InvokeGenerator : IIncrementalGenerator {
     public void Initialize(IncrementalGeneratorInitializationContext context) {
         var fullQualifiedAttribute = typeof(FindAndInvokeAttribute).FullName!;
 
+
+
         context.RegisterPostInitializationOutput(context => context.AddSource("attribute.g.cs", SourceGenerator.Helper.CopyCode.Copy.AutoInvokeFindAndInvokeAttribute));
 
         var methodsAndDiagnostics = context.SyntaxProvider.ForAttributeWithMetadataName(fullQualifiedAttribute,
@@ -42,53 +44,83 @@ public class InvokeGenerator : IIncrementalGenerator {
 
         context.RegisterSourceOutput(diagnostics, (context, data) => context.ReportDiagnostic(data));
 
+        var scanExternalAssemblys = methodsAndDiagnostics.Select((x, cancel) => x.IsFirst && x.First.Any(x => x.Configurations.Any(x => x.ScanExternalAssemblys))).Collect().Select((x, cancel) => x.Any(x => x));
+
+        var externalSymbol = context.MetadataReferencesProvider
+            .Combine(context.CompilationProvider)
+            .SelectMany((input, cancel) => {
+                var (metadataReference, compilation) = input;
+                var assamblyOrModule = compilation.GetAssemblyOrModuleSymbol(metadataReference);
+                if (assamblyOrModule is IAssemblySymbol assembly) {
+                } else if (assamblyOrModule is IModuleSymbol module) {
+                    assembly = module.ContainingAssembly;
+                } else {
+                    return Enumerable.Empty<INamedTypeSymbol>();
+                }
+
+                IEnumerable<INamedTypeSymbol> GetTypes(INamespaceSymbol namespaceSymbol) {
+                    foreach (var type in namespaceSymbol.GetTypeMembers()) {
+                        yield return type;
+                    }
+                    foreach (var ns in namespaceSymbol.GetNamespaceMembers()) {
+                        foreach (var type in GetTypes(ns)) {
+                            yield return type;
+                        }
+                    }
+                }
+
+                return GetTypes(assembly.GlobalNamespace).Where(x => x.DeclaredAccessibility == Accessibility.Public && x.CanBeReferencedByName);
+            })
+            .Combine(scanExternalAssemblys)
+            .Select((input, cancel) => input.Right ? input.Left : null!)
+            .Where(x => x is not null);
+            ;
+
+
+
+
+
+
+
+
         var methodsToHandle = methodsAndDiagnostics.Where(x => x.IsFirst).SelectMany((x, canel) => x.First);
 
         var typeFilters = methodsToHandle.Select((x, cancel) => (x.ImplementedMethodName, x.MethodToCall, x.Configurations)).Collect();
 
-        var typeInfo = context.SyntaxProvider.CreateSyntaxProvider((node, cancel) => node is BaseTypeDeclarationSyntax, (context, cancel) => {
+        IncrementalValuesProvider<INamedTypeSymbol> internalSymbols = context.SyntaxProvider.CreateSyntaxProvider((node, cancel) => node is BaseTypeDeclarationSyntax, (context, cancel) => {
             var syntax = (BaseTypeDeclarationSyntax)context.Node;
 
             if (context.SemanticModel.GetDeclaredSymbol(context.Node, cancellationToken: cancel) is not INamedTypeSymbol symbol) {
                 return default!;// we check for nall later…
             }
             return symbol;
-        }).Where(x => x is not null && !x.IsStatic);
+        });
+        var typesToHandleIntern = RegisterSymbolHandling(context, methodsToHandle, typeFilters, internalSymbols);
+        var typesToHandleExtern = RegisterSymbolHandling(context, methodsToHandle, typeFilters, externalSymbol);
 
-        var typesToHandle = typeInfo.Combine(typeFilters).Select((input, cancel) => {
-            var (symbol, filters) = input;
-            var matchingTransformers = filters
-            .SelectMany(filter =>
-                Satisys(filter.MethodToCall, symbol).Select(x =>
-                (filter.MethodToCall, filter.ImplementedMethodName, filter.Configurations, TypeParameters: x)
-                )
-            )
 
-            .Where(filter =>
-                 filter.Configurations.Any(configuration => {
 
-                     return ((configuration.CallForInterfaces
-                              && symbol.TypeKind == TypeKind.Interface)
-                             || (configuration.CallForStructs && symbol.TypeKind == TypeKind.Struct)
-                             || ((configuration.CallForAbstractClasses == true || symbol.IsAbstract == false)
-                                 && (
-                                     (configuration.CallForClasses && symbol.TypeKind == TypeKind.Class)
-                                     || (configuration.CallForRecords && symbol.IsRecord)
-                                 )))
-                                 && configuration.TypesToHandle.All(condition => {
-                                     return Regex.IsMatch(symbol.Name, condition.Pattern);
-                                 });
-                 })
-            ).ToImmutableArray();
-            return (matchingTransformers, typeName: symbol.ToDisplayString());
-        }).Where(x => x.matchingTransformers.Length > 0).Collect();
-
-        var data = methodsToHandle.Combine(typesToHandle)
+        var data = methodsToHandle.Combine(typesToHandleIntern)
             .Select((input, cancel) => {
                 var (method, types) = input;
-                var correctTypes = types.Select(x => (type: x, transformer: x.matchingTransformers.Where(x => x.ImplementedMethodName == method.ImplementedMethodName).ToArray()));
-                return (method, types: correctTypes.SelectMany(x => x.transformer.Select(y => y.TypeParameters.Select(x => x.ToDisplayString()).ToArray())).ToImmutableArray());
-            });
+                var correctTypes = types.Select(x => (type: x, transformer: x.matchingTransformers.Where(x => x.ImplementedMethodName == method.ImplementedMethodName).ToArray()))
+                .SelectMany(x => x.transformer.Select(y => y.TypeParameters.Select(x => x.ToDisplayString()).ToArray())).ToImmutableArray();
+                return (method, types: correctTypes);
+            }).Combine(typesToHandleExtern)
+            .Select((input, cancel) => {
+                var ((method, previousTypes), types) = input;
+                var correctTypes = types
+                .Select(x => (type: x, transformer: x.matchingTransformers.Where(x => x.ImplementedMethodName == method.ImplementedMethodName).ToArray()))
+                .SelectMany(x => x.transformer.Select(y => y.TypeParameters.Select(x => x.ToDisplayString()).ToArray()))
+                .Concat(previousTypes)
+                .ToImmutableArray()
+                ;
+                return (method, types: correctTypes);
+            })
+
+            ;
+
+
 
         var langVersion = context.ParseOptionsProvider.Select((x, cancel) => ((CSharpParseOptions)x).LanguageVersion);
 
@@ -121,6 +153,44 @@ public class InvokeGenerator : IIncrementalGenerator {
 
             context.AddSource($"{method.Namespace}.{method.DefinedIn.Keyword}.{method.ImplementedMethodName}.g", sb.ToString());
         });
+
+    }
+
+    private static IncrementalValueProvider<ImmutableArray<(ImmutableArray<(IMethodSymbol MethodToCall, string ImplementedMethodName, ImmutableList<RunConfiguration> Configurations, ImmutableArray<ITypeSymbol> TypeParameters)> matchingTransformers, string typeName)>> RegisterSymbolHandling(IncrementalGeneratorInitializationContext context, IncrementalValuesProvider<MethodConfiguration> methodsToHandle, IncrementalValueProvider<ImmutableArray<(string ImplementedMethodName, IMethodSymbol MethodToCall, ImmutableList<RunConfiguration> Configurations)>> typeFilters, IncrementalValuesProvider<INamedTypeSymbol> symbols) {
+        var typeInfo = symbols
+
+            .Where(x => x is not null && !x.IsStatic);
+
+        var typesToHandle = typeInfo.Combine(typeFilters).Select((input, cancel) => {
+            var (symbol, filters) = input;
+            var matchingTransformers = filters
+            .SelectMany(filter =>
+                Satisys(filter.MethodToCall, symbol).Select(x =>
+                (filter.MethodToCall, filter.ImplementedMethodName, filter.Configurations, TypeParameters: x)
+                )
+            )
+
+            .Where(filter =>
+                 filter.Configurations.Any(configuration => {
+
+                     return ((configuration.CallForInterfaces
+                              && symbol.TypeKind == TypeKind.Interface)
+                             || (configuration.CallForStructs && symbol.TypeKind == TypeKind.Struct)
+                             || ((configuration.CallForAbstractClasses == true || symbol.IsAbstract == false)
+                                 && (
+                                     (configuration.CallForClasses && symbol.TypeKind == TypeKind.Class)
+                                     || (configuration.CallForRecords && symbol.IsRecord)
+                                 )))
+                                 && configuration.TypesToHandle.All(condition => {
+                                     return Regex.IsMatch(symbol.Name, condition.Pattern);
+                                 });
+                 })
+            ).ToImmutableArray();
+            return (matchingTransformers, typeName: symbol.ToDisplayString());
+        }).Where(x => x.matchingTransformers.Length > 0).Collect();
+        return typesToHandle;
+
+
     }
 
     private static AnyOf<ImmutableArray<MethodConfiguration>, ImmutableArray<Diagnostic>> Transform(GeneratorAttributeSyntaxContext context, CancellationToken cancellation) {
@@ -208,6 +278,9 @@ public class InvokeGenerator : IIncrementalGenerator {
             }
             if (x.NamedArguments.FirstOrDefault(named => named.Key == nameof(FindAndInvokeAttribute.CallForClasses)).Value is TypedConstant classConst && classConst.Value is bool callForClasses) {
                 configuration.CallForClasses = callForClasses;
+            }
+            if (x.NamedArguments.FirstOrDefault(named => named.Key == nameof(FindAndInvokeAttribute.ScanExternalAssamblies)).Value is TypedConstant scanConst && scanConst.Value is bool scanConstValue) {
+                configuration.ScanExternalAssemblys = scanConstValue;
             }
 
             var methodName = x.NamedArguments.FirstOrDefault(named => named.Key == nameof(FindAndInvokeAttribute.MethodName)).Value is TypedConstant methodNameConst && methodNameConst.Value is string methodName2

@@ -305,7 +305,7 @@ public class InvokeGenerator : IIncrementalGenerator {
 
     private static string GetName(ITypeSymbol symbol) {
         StringBuilder sb = new();
-        sb.Append(symbol.ToDisplayString());
+        sb.Append(symbol.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat));
         return sb.ToString();
     }
 

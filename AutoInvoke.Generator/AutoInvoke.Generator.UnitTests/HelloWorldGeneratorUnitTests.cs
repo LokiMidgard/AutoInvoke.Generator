@@ -369,7 +369,7 @@ partial class GlobalNamespaceGreeter {
             ("T1.T2.class.GetHelloWorld.g.cs", global)
             );
     }
-
+    
     [TestMethod]
     public async Task MethodWithParamsParameters() {
         string code = @"
@@ -378,7 +378,7 @@ namespace T1.T2;
 internal static partial class GlobalNamespaceGreeter
 {
 	[AutoInvoke.FindAndInvoke]
-	public static void GetHelloWorld<T>(string f1, params int[] f2) where T : Foo<string, T> {
+	public static void GetHelloWorld<T>(Guid f1, params int[] f2) where T : Foo<string, T> {
 		
 	}
 }
@@ -392,7 +392,7 @@ class Bar : Foo<string,Bar> {}
 #nullable enable
 namespace T1.T2;
 partial class GlobalNamespaceGreeter {
-    private static void GetHelloWorld(string f1, int[] f2) {
+    private static void GetHelloWorld(global::System.Guid f1, int[] f2) {
         GetHelloWorld<T1.T2.Bar>(f1, f2);
     }
 }
@@ -401,7 +401,7 @@ partial class GlobalNamespaceGreeter {
             ("T1.T2.class.GetHelloWorld.g.cs", global)
             );
     }
-
+    
     [TestMethod]
     public async Task InterfaceWithMultipleGenerics() {
         string code = @"

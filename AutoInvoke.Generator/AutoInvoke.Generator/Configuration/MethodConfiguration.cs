@@ -16,7 +16,7 @@ internal record MethodConfiguration {
     public required string ImplementedMethodName { get; set; }
     public required string Namespace { get; set; }
     public required bool IsStactic { get; set; }
-    public TypeSyntax? ReturnType { get; set; }
+    public ITypeSymbol? ReturnType { get; set; }
     public ImmutableArray<IParameterSymbol> Parameters { get; internal set; }
 }
 

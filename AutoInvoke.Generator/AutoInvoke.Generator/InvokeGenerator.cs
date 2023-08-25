@@ -104,14 +104,14 @@ public class InvokeGenerator : IIncrementalGenerator {
             .Select((input, cancel) => {
                 var (method, types) = input;
                 var correctTypes = types.Select(x => (type: x, transformer: x.matchingTransformers.Where(x => x.ImplementedMethodName == method.ImplementedMethodName).ToArray()))
-                .SelectMany(x => x.transformer.Select(y => y.TypeParameters.Select(x => x.ToDisplayString()).ToArray())).ToImmutableArray();
+                .SelectMany(x => x.transformer.Select(y => y.TypeParameters.Select(x => x.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat)).ToArray())).ToImmutableArray();
                 return (method, types: correctTypes);
             }).Combine(typesToHandleExtern)
             .Select((input, cancel) => {
                 var ((method, previousTypes), types) = input;
                 var correctTypes = types
                 .Select(x => (type: x, transformer: x.matchingTransformers.Where(x => x.ImplementedMethodName == method.ImplementedMethodName).ToArray()))
-                .SelectMany(x => x.transformer.Select(y => y.TypeParameters.Select(x => x.ToDisplayString()).ToArray()))
+                .SelectMany(x => x.transformer.Select(y => y.TypeParameters.Select(x => x.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat)).ToArray()))
                 .Concat(previousTypes)
                 .ToImmutableArray()
                 ;
@@ -133,7 +133,7 @@ public class InvokeGenerator : IIncrementalGenerator {
             sb.WriteSingleLineNamespace(method.Namespace);
             sb.WriteParent(method.DefinedIn, w => {
 
-                string returnType = method.ReturnType is null ? "void" : $"{method.ReturnType}[]";
+                string returnType = method.ReturnType is null ? "void" : $"{GetName(method.ReturnType)}[]";
 
                 w.WriteMethodBlock(SourceCodeWriterExtensions.Visibility.Private, method.ImplementedMethodName, method.IsStactic, false, method.Parameters.Select(x => (GetName(x.Type), x.Name)), returnType, w => {
                     if (method.ReturnType is null) {
@@ -186,7 +186,7 @@ public class InvokeGenerator : IIncrementalGenerator {
                                  });
                  })
             ).ToImmutableArray();
-            return (matchingTransformers, typeName: symbol.ToDisplayString());
+            return (matchingTransformers, typeName: symbol.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat));
         }).Where(x => x.matchingTransformers.Length > 0).Collect();
         return typesToHandle;
 
@@ -200,11 +200,12 @@ public class InvokeGenerator : IIncrementalGenerator {
         var int32TypeInfo = context.SemanticModel.Compilation.GetTypeByMetadataName("System.Int32");
         var typeTypeInfo = context.SemanticModel.Compilation.GetTypeByMetadataName("System.Type");
         var taskTypeInfo = context.SemanticModel.Compilation.GetTypeByMetadataName("System.Threading.Tasks.Task");
+        
+        var methodSymbol = context.TargetSymbol as IMethodSymbol ?? throw new NotSupportedException();
 
         var methodName = method.Identifier.Text;
-        var returnType = !((method.ReturnType as PredefinedTypeSyntax)?.Keyword.Text == "void") ? method.ReturnType : null;
+        var returnType = !((method.ReturnType as PredefinedTypeSyntax)?.Keyword.Text == "void") ? methodSymbol.ReturnType : null;
 
-        var methodSymbol = context.TargetSymbol as IMethodSymbol ?? throw new NotSupportedException();
 
         var parameters = methodSymbol.Parameters;
 
@@ -304,9 +305,7 @@ public class InvokeGenerator : IIncrementalGenerator {
     }
 
     private static string GetName(ITypeSymbol symbol) {
-        StringBuilder sb = new();
-        sb.Append(symbol.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat));
-        return sb.ToString();
+        return symbol.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat);
     }
 
     private static INamedTypeSymbol SubstituteTypeParameters(INamedTypeSymbol toConstrainTo, ITypeSymbol toSubstitute) {

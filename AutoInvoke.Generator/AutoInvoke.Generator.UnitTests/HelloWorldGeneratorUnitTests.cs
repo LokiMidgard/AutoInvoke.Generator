@@ -67,7 +67,7 @@ class Bar {}
 namespace T1.T2;
 partial class GlobalNamespaceGreeter {
     private static void GetHelloWorld() {
-        GetHelloWorld<T1.T2.Foo>();
+        GetHelloWorld<global::T1.T2.Foo>();
     }
 }
 ";
@@ -98,8 +98,8 @@ class Bar :Foo {}
 namespace T1.T2;
 partial class GlobalNamespaceGreeter {
     private static void GetHelloWorld() {
-        GetHelloWorld<T1.T2.Foo>();
-        GetHelloWorld<T1.T2.Bar>();
+        GetHelloWorld<global::T1.T2.Foo>();
+        GetHelloWorld<global::T1.T2.Bar>();
     }
 }
 ";
@@ -131,8 +131,8 @@ class Bar :Foo {}
 #nullable enable
 namespace T1.T2;
 partial class GlobalNamespaceGreeter {
-    private static System.Threading.Tasks.Task[] GetHelloWorld() {
-        return new []{GetHelloWorld<T1.T2.Foo>(), GetHelloWorld<T1.T2.Bar>()};
+    private static global::System.Threading.Tasks.Task[] GetHelloWorld() {
+        return new []{GetHelloWorld<global::T1.T2.Foo>(), GetHelloWorld<global::T1.T2.Bar>()};
     }
 }
 ";
@@ -165,7 +165,7 @@ class Bar : Foo{}
 namespace T1.T2;
 partial class GlobalNamespaceGreeter {
     private static void GetHelloWorld() {
-        GetHelloWorld<T1.T2.Bar>();
+        GetHelloWorld<global::T1.T2.Bar>();
     }
 }
 ";
@@ -197,8 +197,8 @@ class Bar {}
 namespace T1.T2;
 partial class GlobalNamespaceGreeter {
     private static void GetHelloWorld() {
-        GetHelloWorld<T1.T2.Bar>();
-        GetHelloWorld<AutoInvoke.FindAndInvokeAttribute>();
+        GetHelloWorld<global::T1.T2.Bar>();
+        GetHelloWorld<global::AutoInvoke.FindAndInvokeAttribute>();
     }
 }
 ";
@@ -231,7 +231,7 @@ class Bar : Foo<Bar> {}
 namespace T1.T2;
 partial class GlobalNamespaceGreeter {
     private static void GetHelloWorld() {
-        GetHelloWorld<T1.T2.Bar>();
+        GetHelloWorld<global::T1.T2.Bar>();
     }
 }
 ";
@@ -264,7 +264,7 @@ class My : Foo<Bar<My>> {}
 namespace T1.T2;
 partial class GlobalNamespaceGreeter {
     private static void GetHelloWorld() {
-        GetHelloWorld<T1.T2.My>();
+        GetHelloWorld<global::T1.T2.My>();
     }
 }
 ";
@@ -298,7 +298,7 @@ class Bar2 : Foo<int> {}
 namespace T1.T2;
 partial class GlobalNamespaceGreeter {
     private static void GetHelloWorld() {
-        GetHelloWorld<T1.T2.Bar>();
+        GetHelloWorld<global::T1.T2.Bar>();
     }
 }
 ";
@@ -329,7 +329,7 @@ class Bar : Foo<string,Bar> {}
 namespace T1.T2;
 partial class GlobalNamespaceGreeter {
     private static void GetHelloWorld() {
-        GetHelloWorld<T1.T2.Bar>();
+        GetHelloWorld<global::T1.T2.Bar>();
     }
 }
 ";
@@ -361,7 +361,7 @@ class Bar : Foo<string,Bar> {}
 namespace T1.T2;
 partial class GlobalNamespaceGreeter {
     private static void GetHelloWorld(string f1, int f2) {
-        GetHelloWorld<T1.T2.Bar>(f1, f2);
+        GetHelloWorld<global::T1.T2.Bar>(f1, f2);
     }
 }
 ";
@@ -393,7 +393,7 @@ class Bar : Foo<string,Bar> {}
 namespace T1.T2;
 partial class GlobalNamespaceGreeter {
     private static void GetHelloWorld(global::System.Guid f1, int[] f2) {
-        GetHelloWorld<T1.T2.Bar>(f1, f2);
+        GetHelloWorld<global::T1.T2.Bar>(f1, f2);
     }
 }
 ";
@@ -427,8 +427,8 @@ class Bar3 : Foo<Object,Bar3> {}
 namespace T1.T2;
 partial class GlobalNamespaceGreeter {
     private static void GetHelloWorld() {
-        GetHelloWorld<T1.T2.Bar, System.FlagsAttribute>();
-        GetHelloWorld<T1.T2.Bar2, System.MTAThreadAttribute>();
+        GetHelloWorld<global::T1.T2.Bar, global::System.FlagsAttribute>();
+        GetHelloWorld<global::T1.T2.Bar2, global::System.MTAThreadAttribute>();
     }
 }
 ";
@@ -483,7 +483,7 @@ internal static partial class GlobalNamespaceGreeter
 namespace T1.T2;
 partial class GlobalNamespaceGreeter {
     private static void GetHelloWorld() {
-        GetHelloWorld<System.Collections.Stack>();
+        GetHelloWorld<global::System.Collections.Stack>();
     }
 }
 ";
@@ -533,7 +533,7 @@ internal partial class TileSetFile : IProjectItemContent<TileSetFile> {}
 namespace T1.T2;
 partial class GlobalNamespaceGreeter {
     private void GetView() {
-        GetView<T1.T2.TileSetEditor, T1.T2.TileSetViewModel, T1.T2.TileSetFile>();
+        GetView<global::T1.T2.TileSetEditor, global::T1.T2.TileSetViewModel, global::T1.T2.TileSetFile>();
     }
 }
 ";

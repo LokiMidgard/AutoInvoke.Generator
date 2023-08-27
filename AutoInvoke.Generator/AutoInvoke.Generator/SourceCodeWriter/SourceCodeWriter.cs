@@ -12,6 +12,7 @@ using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Microsoft.CodeAnalysis.CSharp;
 using System.Text.RegularExpressions;
 using static System.Net.Mime.MediaTypeNames;
+using System.Runtime.ExceptionServices;
 
 namespace AutoInvoke.Generator.SourceCodeWriter;
 
@@ -23,7 +24,7 @@ internal interface IWriter : IDisposable {
 internal static class SourceCode {
     public static ISourceCodeWriter New(LanguageVersion languageVersion) => FromStringBuilder(new StringBuilder(), languageVersion);
     public static ISourceCodeWriter FromStringBuilder(StringBuilder builder, LanguageVersion languageVersion) => new SourceCodeStringBuilderWriter(builder, languageVersion);
-    public static ISourceCodeWriter WithIndention(this ISourceCodeWriter writer) => new SourceCodeIndentWriter(writer);
+    public static ISourceCodeIndentWriter WithIndention(this ISourceCodeWriter writer) => new SourceCodeIndentWriter(writer);
     public static ISourceCodeWriter WithReplace(this ISourceCodeWriter writer, string toReplace, string replacement) => new SourceCodeReplaceWriter(writer, toReplace, replacement);
     public static ISourceCodeWriter WithPrePostFix(this ISourceCodeWriter writer, string preFix = "", string postFix = "", string linePreFix = "", string linePostFix = "") => new SourceCodePrePostWriter(writer, preFix, postFix, linePreFix, linePostFix);
 
@@ -277,7 +278,8 @@ file class SourceCodeStringBuilderWriter : SourceCodeWriter {
 
     public override void Write(ReadOnlySpan<char> text) {
         if (text.IndexOf('\n') == -1) {
-            builder.Append(text.ToString());
+            string toAppend = text.ToString();
+            builder.Append(toAppend);
             isAtStartOfLine = false;
         } else {
             var enumerator = text.Split("\n".AsSpan());
@@ -327,14 +329,22 @@ file class SourceCodeIndentWriter : SourceCodeWriter, ISourceCodeIndentWriter {
     public override void Write(ReadOnlySpan<char> text) {
         if (isAtStartOfLine) {
             writer.Write(indentations[indent]);
+            isAtStartOfLine = false;
         }
         if (text.IndexOf('\n') == -1) {
             writer.Write(text);
             isAtStartOfLine = false;
         } else {
+
             var enumerator = text.Split("\n".AsSpan());
+            var first = true;
             foreach (var line in enumerator) {
-                WriteLine(line.Trim('\r'));
+                if (first) {
+                    first = false;
+                } else {
+                    WriteLine();
+                }
+                Write(line.Trim('\r'));
             }
         }
     }
@@ -356,7 +366,12 @@ file class SourceCodeIndentWriter : SourceCodeWriter, ISourceCodeIndentWriter {
         if (indentations.Count <= indent) {
             indentations.Add(new string(' ', 4 * indent));
         }
-        return new OnDispose(() => { indent--; });
+        return new OnDispose(() => {
+            if (!isAtStartOfLine) {
+                WriteLine();
+            }
+            indent--;
+        });
     }
     protected override string ToStringfile() {
         return writer.ToString();

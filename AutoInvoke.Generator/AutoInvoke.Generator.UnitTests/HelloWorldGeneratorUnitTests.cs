@@ -132,7 +132,10 @@ class Bar :Foo {}
 namespace T1.T2;
 partial class GlobalNamespaceGreeter {
     private static global::System.Threading.Tasks.Task[] GetHelloWorld() {
-        return new []{GetHelloWorld<global::T1.T2.Foo>(), GetHelloWorld<global::T1.T2.Bar>()};
+        return new [] {
+            GetHelloWorld<global::T1.T2.Foo>(),
+            GetHelloWorld<global::T1.T2.Bar>()
+        };
     }
 }
 ";

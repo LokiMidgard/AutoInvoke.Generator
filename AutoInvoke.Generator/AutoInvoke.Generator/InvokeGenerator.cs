@@ -137,16 +137,19 @@ public class InvokeGenerator : IIncrementalGenerator {
 
                 w.WriteMethodBlock(SourceCodeWriterExtensions.Visibility.Private, method.ImplementedMethodName, method.IsStactic, false, method.Parameters.Select(x => (GetName(x.Type), x.Name)), returnType, w => {
                     if (method.ReturnType is null) {
-                        foreach (var type in types) {
+                        foreach (var type in types.Distinct(ArrayComparer.Default<string>())) {
                             w.WriteLine($"{method.MethodToCall.Name}<{string.Join(", ", type)}>({string.Join(", ", method.Parameters.Select(x => x.Name))});");
                         }
                     } else {
 
-                        w.WriteLine(w => {
-                            w.Write("return new []{");
-                            w.Write(string.Join(", ", types.Select(type => $"{method.MethodToCall.Name}<{string.Join(", ", type)}>({string.Join(", ", method.Parameters.Select(x => x.Name))})")));
-                            w.Write("};");
-                        });
+
+                        w.WriteLine("return new [] {");
+                        using (var indent = w.WithIndention())
+                        using (indent.Indent()) {
+                            indent.WriteLine(string.Join(",\n", types.Distinct(ArrayComparer.Default<string>()).Select(type => $"{method.MethodToCall.Name}<{string.Join(", ", type)}>({string.Join(", ", method.Parameters.Select(x => x.Name))})")));
+                        }
+                        w.WriteLine("};");
+
                     }
                 });
             });
@@ -200,7 +203,7 @@ public class InvokeGenerator : IIncrementalGenerator {
         var int32TypeInfo = context.SemanticModel.Compilation.GetTypeByMetadataName("System.Int32");
         var typeTypeInfo = context.SemanticModel.Compilation.GetTypeByMetadataName("System.Type");
         var taskTypeInfo = context.SemanticModel.Compilation.GetTypeByMetadataName("System.Threading.Tasks.Task");
-        
+
         var methodSymbol = context.TargetSymbol as IMethodSymbol ?? throw new NotSupportedException();
 
         var methodName = method.Identifier.Text;
@@ -435,7 +438,7 @@ public class InvokeGenerator : IIncrementalGenerator {
                     if (mapping.Key) {
 
                         return mapping.GroupBy(s => s.TypeMapping[typeParameterConstraint], SymbolEqualityComparer.Default)
-                        .SelectMany(x => CheckTypeConsraint((ITypeSymbol)x.Key!, checkAgainst, x.AddTrue())).Where(x=>x.Succsess);
+                        .SelectMany(x => CheckTypeConsraint((ITypeSymbol)x.Key!, checkAgainst, x.AddTrue())).Where(x => x.Succsess);
 
                         //CheckTypeConsraint(s.TypeMapping[typeParameterConstraint], checkAgainst, mapping.AddTrue());
                         //return mapping.Select(s => SymbolEqualityComparer.Default.Equals(s.TypeMapping[typeParameterConstraint], checkAgainst) ? s.AddTrue() : s.AddFalse()).Where(x => x.Succsess);
@@ -484,7 +487,7 @@ public class InvokeGenerator : IIncrementalGenerator {
                 }).AddTrue();
 
                 return tree;
-            
+
 
             } else if (constraint is IArrayTypeSymbol arrayConstraint && checkAgainst is IArrayTypeSymbol arrayCheckedAgainst) {
                 return CheckTypeConsraint(arrayConstraint.ElementType, arrayCheckedAgainst.ElementType, tree).AddChild((currentTypeConstraint, checkAgainst));

@@ -16,6 +16,9 @@ using System.Runtime.ExceptionServices;
 
 namespace AutoInvoke.Generator.SourceCodeWriter;
 
+file static class Environment {
+    internal const string NewLine = "\r\n";
+}
 internal interface IWriter : IDisposable {
     public void Write(string text);
     public void Write(ReadOnlySpan<char> text);

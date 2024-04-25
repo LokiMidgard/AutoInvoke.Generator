@@ -31,6 +31,8 @@ internal sealed class FindAndInvokeAttribute : System.Attribute {
     public bool CallForStructs { get; set; }
     public bool CallForClasses { get; set; }
     public bool CallForRecords { get; set; }
+    public bool CallForEnums { get; set; }
+
 
 #pragma warning restore CS0169 // Remove unused parameter
 #pragma warning restore IDE0060 // Remove unused parameter

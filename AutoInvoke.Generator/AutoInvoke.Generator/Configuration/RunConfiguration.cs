@@ -12,7 +12,7 @@ internal record RunConfiguration {
     public bool CallForAbstractClasses { get; set; } = false;
     public bool CallForInterfaces { get; set; } = false;
     public bool CallForStructs { get; set; } = true;
-    public bool CallForEnums { get; set; } = true;
     public bool CallForRecords { get; set; } = true;
     public bool CallForClasses { get; set; } = true;
+    public bool CallForEnums { get; set; } = true;
 }

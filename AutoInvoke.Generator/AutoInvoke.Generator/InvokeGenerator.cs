@@ -175,7 +175,10 @@ public class InvokeGenerator : IIncrementalGenerator {
 
             .Where(filter =>
                  filter.Configurations.Any(configuration => {
-
+                         var syntax = symbol.DeclaringSyntaxReferences.FirstOrDefault()?.GetSyntax();
+                         if (syntax is BaseTypeDeclarationSyntax  baseType && baseType.Modifiers.Any(x=>x.IsKind(SyntaxKind.FileKeyword))) {
+                             return false; // igoner file scoped files
+                     }
                      return ((configuration.CallForInterfaces
                               && symbol.TypeKind == TypeKind.Interface)
                              || (configuration.CallForStructs && symbol.TypeKind == TypeKind.Struct)
@@ -286,6 +289,9 @@ public class InvokeGenerator : IIncrementalGenerator {
             }
             if (x.NamedArguments.FirstOrDefault(named => named.Key == nameof(FindAndInvokeAttribute.ScanExternalAssamblies)).Value is TypedConstant scanConst && scanConst.Value is bool scanConstValue) {
                 configuration.ScanExternalAssemblys = scanConstValue;
+            }
+            if (x.NamedArguments.FirstOrDefault(named => named.Key == nameof(FindAndInvokeAttribute.CallForEnums)).Value is TypedConstant enumConst && enumConst.Value is bool enumConstValue) {
+                configuration.CallForEnums = enumConstValue;
             }
 
             var methodName = x.NamedArguments.FirstOrDefault(named => named.Key == nameof(FindAndInvokeAttribute.MethodName)).Value is TypedConstant methodNameConst && methodNameConst.Value is string methodName2

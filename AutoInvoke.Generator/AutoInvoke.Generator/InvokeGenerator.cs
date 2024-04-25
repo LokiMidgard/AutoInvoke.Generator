@@ -179,6 +179,7 @@ public class InvokeGenerator : IIncrementalGenerator {
                      return ((configuration.CallForInterfaces
                               && symbol.TypeKind == TypeKind.Interface)
                              || (configuration.CallForStructs && symbol.TypeKind == TypeKind.Struct)
+                             || (configuration.CallForEnums && symbol.TypeKind == TypeKind.Enum)
                              || ((configuration.CallForAbstractClasses == true || symbol.IsAbstract == false)
                                  && (
                                      (configuration.CallForClasses && symbol.TypeKind == TypeKind.Class)

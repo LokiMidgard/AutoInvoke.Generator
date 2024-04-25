@@ -63,12 +63,14 @@ internal sealed class FindAndInvokeAttribute : System.Attribute
     {
     }
 
+    public bool ScanExternalAssamblies { get; set; }
     public string MethodName { get; set; }
     public bool CallForAbstractClasses { get; set; }
     public bool CallForInterfaces { get; set; }
     public bool CallForStructs { get; set; }
     public bool CallForClasses { get; set; }
     public bool CallForRecords { get; set; }
+    public bool CallForEnums { get; set; }
 #pragma warning restore CS0169 // Remove unused parameter
 
 #pragma warning restore IDE0060 // Remove unused parameter
@@ -82,8 +84,8 @@ internal sealed class FindAndInvokeAttribute : System.Attribute
 namespace T1.T2;
 partial class GlobalNamespaceGreeter {
     private static void GetHelloWorld() {
-        GetHelloWorld<T1.T2.Foo>();
-        GetHelloWorld<T1.T2.Bar>();
+        GetHelloWorld<global::T1.T2.Foo>();
+        GetHelloWorld<global::T1.T2.Bar>();
     }
 }
 ";

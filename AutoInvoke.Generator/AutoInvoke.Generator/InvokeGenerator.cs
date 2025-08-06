@@ -26,12 +26,17 @@ namespace AutoInvoke.Generator;
 [Generator(LanguageNames.CSharp)]
 public class InvokeGenerator : IIncrementalGenerator {
     private static readonly DiagnosticDescriptor IG0001 = new DiagnosticDescriptor("IG0001", "A Single Type can't satisfy all constrints", "One Type Parameter must contain all others, otherwise a singele Type will not Satisfy all Constrains", "Design", DiagnosticSeverity.Error, true);
+    private static readonly string fullQualifiedAttribute = typeof(FindAndInvokeAttribute).FullName!;
+    private static readonly string fullQualifiedTypeArgumentAttribute = typeof(CallForAttribute).FullName!;
+    private static readonly string fullQualifiedTypeArgumentParameter = typeof(CallFor).FullName!;
+
     public void Initialize(IncrementalGeneratorInitializationContext context) {
-        var fullQualifiedAttribute = typeof(FindAndInvokeAttribute).FullName!;
 
 
 
         context.RegisterPostInitializationOutput(context => context.AddSource("attribute.g.cs", SourceGenerator.Helper.CopyCode.Copy.AutoInvokeFindAndInvokeAttribute));
+        context.RegisterPostInitializationOutput(context => context.AddSource("CallFor.g.cs", SourceGenerator.Helper.CopyCode.Copy.AutoInvokeCallFor));
+        context.RegisterPostInitializationOutput(context => context.AddSource("attributeCallFor.g.cs", SourceGenerator.Helper.CopyCode.Copy.AutoInvokeCallForAttribute));
 
         var methodsAndDiagnostics = context.SyntaxProvider.ForAttributeWithMetadataName(fullQualifiedAttribute,
             (node, cancel) =>
@@ -44,7 +49,7 @@ public class InvokeGenerator : IIncrementalGenerator {
 
         context.RegisterSourceOutput(diagnostics, (context, data) => context.ReportDiagnostic(data));
 
-        var scanExternalAssemblys = methodsAndDiagnostics.Select((x, cancel) => x.IsFirst && x.First.Any(x => x.Configurations.Any(x => x.ScanExternalAssemblys))).Collect().Select((x, cancel) => x.Any(x => x));
+        var scanExternalAssemblys = methodsAndDiagnostics.Select((x, cancel) => x.IsFirst && x.First.Any(x => x.Configurations.ScanExternalAssemblys)).Collect().Select((x, cancel) => x.Any(x => x));
 
         var externalSymbol = context.MetadataReferencesProvider
             .Combine(context.CompilationProvider)
@@ -95,6 +100,8 @@ public class InvokeGenerator : IIncrementalGenerator {
             }
             return symbol;
         });
+
+
         var typesToHandleIntern = RegisterSymbolHandling(context, methodsToHandle, typeFilters, internalSymbols);
         var typesToHandleExtern = RegisterSymbolHandling(context, methodsToHandle, typeFilters, externalSymbol);
 
@@ -159,42 +166,25 @@ public class InvokeGenerator : IIncrementalGenerator {
 
     }
 
-    private static IncrementalValueProvider<ImmutableArray<(ImmutableArray<(IMethodSymbol MethodToCall, string ImplementedMethodName, ImmutableList<RunConfiguration> Configurations, ImmutableArray<ITypeSymbol> TypeParameters)> matchingTransformers, string typeName)>> RegisterSymbolHandling(IncrementalGeneratorInitializationContext context, IncrementalValuesProvider<MethodConfiguration> methodsToHandle, IncrementalValueProvider<ImmutableArray<(string ImplementedMethodName, IMethodSymbol MethodToCall, ImmutableList<RunConfiguration> Configurations)>> typeFilters, IncrementalValuesProvider<INamedTypeSymbol> symbols) {
+    private static IncrementalValueProvider<ImmutableArray<(ImmutableArray<(IMethodSymbol MethodToCall, string ImplementedMethodName, RunConfiguration Configurations, ImmutableArray<ITypeSymbol> TypeParameters)> matchingTransformers, string typeName)>> RegisterSymbolHandling(IncrementalGeneratorInitializationContext context, IncrementalValuesProvider<MethodConfiguration> methodsToHandle, IncrementalValueProvider<ImmutableArray<(string ImplementedMethodName, IMethodSymbol MethodToCall, RunConfiguration Configurations)>> typeFilters, IncrementalValuesProvider<INamedTypeSymbol> symbols) {
         var typeInfo = symbols
 
             .Where(x => x is not null && !x.IsStatic);
 
-        var typesToHandle = typeInfo.Combine(typeFilters).Select((input, cancel) => {
-            var (symbol, filters) = input;
-            var matchingTransformers = filters
-            .SelectMany(filter =>
-                Satisys(filter.MethodToCall, symbol).Select(x =>
-                (filter.MethodToCall, filter.ImplementedMethodName, filter.Configurations, TypeParameters: x)
-                )
-            )
+        var typesToHandle = typeInfo
+                .Combine(typeFilters)
+                .Combine(context.CompilationProvider)
+                .Select((input, cancel) => {
+                    var ((symbol, filters), compilation) = input;
 
-            .Where(filter =>
-                 filter.Configurations.Any(configuration => {
-                         var syntax = symbol.DeclaringSyntaxReferences.FirstOrDefault()?.GetSyntax();
-                         if (syntax is BaseTypeDeclarationSyntax  baseType && baseType.Modifiers.Any(x=>x.IsKind(SyntaxKind.FileKeyword))) {
-                             return false; // igoner file scoped files
-                     }
-                     return ((configuration.CallForInterfaces
-                              && symbol.TypeKind == TypeKind.Interface)
-                             || (configuration.CallForStructs && symbol.TypeKind == TypeKind.Struct)
-                             || (configuration.CallForEnums && symbol.TypeKind == TypeKind.Enum)
-                             || ((configuration.CallForAbstractClasses == true || symbol.IsAbstract == false)
-                                 && (
-                                     (configuration.CallForClasses && symbol.TypeKind == TypeKind.Class)
-                                     || (configuration.CallForRecords && symbol.IsRecord)
-                                 )))
-                                 && configuration.TypesToHandle.All(condition => {
-                                     return Regex.IsMatch(symbol.Name, condition.Pattern);
-                                 });
-                 })
-            ).ToImmutableArray();
-            return (matchingTransformers, typeName: symbol.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat));
-        }).Where(x => x.matchingTransformers.Length > 0).Collect();
+                    var matchingTransformers = filters
+                    .SelectMany(filter =>
+                        Satisys(filter.MethodToCall, filter.Configurations, symbol, compilation).Select(x =>
+                        (filter.MethodToCall, filter.ImplementedMethodName, filter.Configurations, TypeParameters: x)
+                        )
+                    ).ToImmutableArray();
+                    return (matchingTransformers, typeName: symbol.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat));
+                }).Where(x => x.matchingTransformers.Length > 0).Collect();
         return typesToHandle;
 
 
@@ -262,36 +252,41 @@ public class InvokeGenerator : IIncrementalGenerator {
             }
             @namespace = builder.ToString();
         }
+
+        // check for attributes on the Type arguments
+        var callForList = methodSymbol.TypeArguments.Select(typeArgument => {
+            var typeConfiguration = typeArgument.GetAttributes().Where(x => fullQualifiedTypeArgumentAttribute == x.AttributeClass?.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat)?.Replace("global::", ""))
+                .Select(x => {
+                    var pattern = x.NamedArguments.Where(named => named.Key == nameof(CallForAttribute.Pattern)).Select(named => named.Value.Value).OfType<string>().FirstOrDefault();
+                    var callFor = (CallFor)(x.ConstructorArguments[0].Value ?? throw new InvalidOperationException("CallForAttribute must have a CallFor value as first argument"));
+                    return new TypeConfiguration() {
+                        CallFor = callFor,
+                        TypeNamePattern = pattern
+                    };
+                }).SingleOrDefault();
+
+            if (typeConfiguration == null) {
+                typeConfiguration = new TypeConfiguration() { CallFor = CallFor.NonAbstractTypes, TypeNamePattern = null };
+            }
+
+
+            return typeConfiguration;
+        }).ToImmutableList();
+
         var configurations = context.Attributes.Select(x => {
             RunConfiguration configuration;
             if (x.ConstructorArguments.Length == 0) {
-                configuration = new RunConfiguration() { TypesToHandle = ImmutableList.Create<RegexConstraint>() };
+                configuration = new RunConfiguration() { TypeConfigurations = callForList };
             } else if (SymbolEqualityComparer.Default.Equals(x.ConstructorArguments[0].Type, stringTypeInfo)) {
-                configuration = new RunConfiguration() { TypesToHandle = ImmutableList.Create(new RegexConstraint() { Pattern = x.ConstructorArguments[0].Value as string ?? throw new NotSupportedException("Pattern must not be null") }) };
+                configuration = new RunConfiguration() {
+                    TypeConfigurations = callForList
+                };
             } else {
                 throw new NotImplementedException();
             }
 
-            if (x.NamedArguments.FirstOrDefault(named => named.Key == nameof(FindAndInvokeAttribute.CallForStructs)).Value is TypedConstant srtuctConst && srtuctConst.Value is bool callForStructs) {
-                configuration.CallForStructs = callForStructs;
-            }
-            if (x.NamedArguments.FirstOrDefault(named => named.Key == nameof(FindAndInvokeAttribute.CallForRecords)).Value is TypedConstant recordConst && recordConst.Value is bool callForRecords) {
-                configuration.CallForRecords = callForRecords;
-            }
-            if (x.NamedArguments.FirstOrDefault(named => named.Key == nameof(FindAndInvokeAttribute.CallForInterfaces)).Value is TypedConstant interfaceConst && interfaceConst.Value is bool callForInterfaces) {
-                configuration.CallForInterfaces = callForInterfaces;
-            }
-            if (x.NamedArguments.FirstOrDefault(named => named.Key == nameof(FindAndInvokeAttribute.CallForAbstractClasses)).Value is TypedConstant abstractConst && abstractConst.Value is bool callForAbstractClasses) {
-                configuration.CallForAbstractClasses = callForAbstractClasses;
-            }
-            if (x.NamedArguments.FirstOrDefault(named => named.Key == nameof(FindAndInvokeAttribute.CallForClasses)).Value is TypedConstant classConst && classConst.Value is bool callForClasses) {
-                configuration.CallForClasses = callForClasses;
-            }
             if (x.NamedArguments.FirstOrDefault(named => named.Key == nameof(FindAndInvokeAttribute.ScanExternalAssamblies)).Value is TypedConstant scanConst && scanConst.Value is bool scanConstValue) {
                 configuration.ScanExternalAssemblys = scanConstValue;
-            }
-            if (x.NamedArguments.FirstOrDefault(named => named.Key == nameof(FindAndInvokeAttribute.CallForEnums)).Value is TypedConstant enumConst && enumConst.Value is bool enumConstValue) {
-                configuration.CallForEnums = enumConstValue;
             }
 
             var methodName = x.NamedArguments.FirstOrDefault(named => named.Key == nameof(FindAndInvokeAttribute.MethodName)).Value is TypedConstant methodNameConst && methodNameConst.Value is string methodName2
@@ -299,7 +294,7 @@ public class InvokeGenerator : IIncrementalGenerator {
                 : null;
             return (configuration, methodName);
         }).GroupBy(x => x.methodName).Select(x => {
-            var list = x.Select(x => x.configuration).ToImmutableList();
+            var list = x.Select(x => x.configuration).Single();
             return new MethodConfiguration() {
                 Configurations = list,
                 DefinedIn = parent,
@@ -334,7 +329,7 @@ public class InvokeGenerator : IIncrementalGenerator {
     }
 
 
-    private static ImmutableArray<ImmutableArray<ITypeSymbol>> Satisys(IMethodSymbol methodSymbol, INamedTypeSymbol type) {
+    private static ImmutableArray<ImmutableArray<ITypeSymbol>> Satisys(IMethodSymbol methodSymbol, RunConfiguration configuration, INamedTypeSymbol type, Compilation compilation) {
 
         if (type.IsGenericType) {
             return ImmutableArray<ImmutableArray<ITypeSymbol>>.Empty; // We only support concrete implementations
@@ -343,6 +338,7 @@ public class InvokeGenerator : IIncrementalGenerator {
         ITypeParameterSymbol? typeParameterToImplement;
         if (methodSymbol.TypeParameters.Length == 1) {
             // if it is only one parameter, it can be a concrete type or a self referencing type  there are no other TypeParameter that are independent
+            System.Diagnostics.Debug.Assert(configuration.TypeConfigurations.Count == 1, "If there is only one TypeParameter, there must be only one TypeConfiguration");
             typeParameterToImplement = methodSymbol.TypeParameters[0];
         } else {
             // We need to find one type parameter, that is dependend on all other TypeParameters.
@@ -359,18 +355,52 @@ public class InvokeGenerator : IIncrementalGenerator {
         }
 
         // We do not need to check other Type Parameters explicitly, since Type parameter already contains every other
-        var allValidParameters = CheckTypeConsraint(typeParameterToImplement, type, TypeConstraintResultTree.CreateRoot().ToList(), true);
+        var allValidParameters = CheckTypeConsraint(typeParameterToImplement, type, TypeConstraintResultTree.CreateRoot().ToList(), compilation, true);
 
         // check if all TypeParameters were assingend
         ImmutableArray<ImmutableArray<ITypeSymbol>> immutableArray = allValidParameters.Select(x =>
 
                     methodSymbol.TypeParameters
-                    .Select(typeParameter => x.TypeMapping.GetValueOrDefault(typeParameter)).OfType<ITypeSymbol>().ToImmutableArray())
+                    .Where((typeArgumentParameter, index) => {
+                        // check if the type sattisfyes the constraint in configuration
+                        var currentConfiguration = configuration.TypeConfigurations[index];
+                        var parameter = x.TypeMapping.GetValueOrDefault(typeArgumentParameter);
+
+                        // ignore file scoped types
+                        if (parameter.DeclaringSyntaxReferences.FirstOrDefault()?.GetSyntax() is BaseTypeDeclarationSyntax baseType && baseType.Modifiers.Any(x => x.IsKind(SyntaxKind.FileKeyword))) {
+                            return false; // ignore file scoped types
+                        }
+
+                        if (currentConfiguration.TypeNamePattern is not null && !Regex.IsMatch(parameter.Name, currentConfiguration.TypeNamePattern)) {
+                            return false; // the type does not match the pattern
+                        }
+
+                        var fullQualifiedName = parameter.ToDisplayString(SymbolDisplayFormat.FullyQualifiedFormat).Replace("global::", "");
+                        // check if type is not one of the generated classes of this generator
+                        if (fullQualifiedName == fullQualifiedAttribute
+                        || fullQualifiedName == fullQualifiedTypeArgumentAttribute
+                        || fullQualifiedName == fullQualifiedTypeArgumentParameter
+                        ) {
+                            return false; // ignore types generated by this generator
+                        }
+
+
+                        return parameter.TypeKind switch {
+                            TypeKind.Class => currentConfiguration.CallFor.HasFlag(CallFor.Class) && !parameter.IsRecord && !parameter.IsAbstract
+                                            || currentConfiguration.CallFor.HasFlag(CallFor.AbstractClass) && !parameter.IsRecord && parameter.IsAbstract
+                                            || currentConfiguration.CallFor.HasFlag(CallFor.RecordClass) && parameter.IsRecord,
+                            TypeKind.Struct => currentConfiguration.CallFor.HasFlag(CallFor.Struct) && !parameter.IsRecord || currentConfiguration.CallFor.HasFlag(CallFor.RecordStruct) && parameter.IsRecord,
+                            TypeKind.Interface => currentConfiguration.CallFor.HasFlag(CallFor.Interface),
+                            TypeKind.Enum => currentConfiguration.CallFor.HasFlag(CallFor.Enum),
+                            _ => false
+                        };
+                    })
+                    .Select(typeArgumentParameter => x.TypeMapping.GetValueOrDefault(typeArgumentParameter)).OfType<ITypeSymbol>().ToImmutableArray())
                     .Where(x => x.Length == methodSymbol.TypeParameters.Length)
                     .ToImmutableArray();
         return immutableArray;
 
-        ImmutableArray<TypeConstraintResultTree> CheckTypeConsraint(ITypeSymbol constraint, ITypeSymbol checkAgainst, ImmutableArray<TypeConstraintResultTree> tree, bool firstCall = false, ITypeParameterSymbol? currentTypeConstraint = null) {
+        ImmutableArray<TypeConstraintResultTree> CheckTypeConsraint(ITypeSymbol constraint, ITypeSymbol checkAgainst, ImmutableArray<TypeConstraintResultTree> tree, Compilation compilation, bool firstCall = false, ITypeParameterSymbol? currentTypeConstraint = null) {
 
             if (!tree.Any()) {
                 return tree.AddTrue();
@@ -378,12 +408,27 @@ public class InvokeGenerator : IIncrementalGenerator {
 
             if (checkAgainst is INamedTypeSymbol namedCheckAgainst && constraint is INamedTypeSymbol namedConstraint) {
                 // check if the types are equal ignoring type parameters
-                var exactCheck = CheckAgainstExactType(tree, namedCheckAgainst, namedConstraint).AddChild((currentTypeConstraint, checkAgainst));
+
+
+                ImmutableArray<TypeConstraintResultTree> typeConstraintResultTrees = CheckAgainstExactType(tree, namedCheckAgainst, namedConstraint);
+                var exactCheck = typeConstraintResultTrees;//.AddChild((currentTypeConstraint, checkAgainst));
                 if (exactCheck.Length != 0) {
                     return exactCheck;
                 }
 
+                var isAssignable2 = compilation.HasImplicitConversion(namedCheckAgainst, namedConstraint);
+                if (isAssignable2) {
+                    return tree.AddChild((currentTypeConstraint, checkAgainst));
+
+                }
+
+
                 if (namedConstraint.TypeKind != TypeKind.Interface) {
+
+                    //if(namedCheckAgainst.TypeKind == TypeKind.Interface) {
+                    //    throw new Exception();
+                    //} else {
+
 
                     // the type dose not match, we check the base types, is one matches, we are good
                     var currentBaseType = namedCheckAgainst;
@@ -396,18 +441,49 @@ public class InvokeGenerator : IIncrementalGenerator {
                         }
                     }
                     return tree.AddFalse();
+                    //}
                 } else if (checkAgainst.TypeKind != TypeKind.Interface) {
 
                     // if that did not work check if there is an interface implementation
-                    return namedCheckAgainst.AllInterfaces.Select(@interface => CheckTypeConsraint(constraint, @interface, tree))
+                    return namedCheckAgainst.AllInterfaces.Select(@interface => CheckTypeConsraint(constraint, @interface, tree, compilation, currentTypeConstraint: currentTypeConstraint))
                         .SelectMany(x => x)
                         .AddChild((currentTypeConstraint, checkAgainst)); // If none matched the list will be empty so none is set true
                 } else {
+
+                    // if that did not work check if there is an interface implementation
+                    var xxx = namedCheckAgainst.AllInterfaces.Select(@interface => CheckTypeConsraint(constraint, @interface, tree, compilation, currentTypeConstraint: currentTypeConstraint))
+                        .SelectMany(x => x)
+                        .AddChild((currentTypeConstraint, checkAgainst)); // If none matched the list will be empty so none is set true
+                    if (xxx.Length > 0) {
+                        return xxx;
+                    }
+                    if (namedConstraint.IsUnboundGenericType) {
+                        // if the constraint is an unbound generic type, we need to check if the checkAgainst is a generic type that can be bound to the constraint
+                        var checkAgainstUnbound = namedCheckAgainst.ConstructUnboundGenericType();
+                        var constraintUnbound = namedConstraint.ConstructUnboundGenericType();
+                        if (SymbolEqualityComparer.Default.Equals(checkAgainstUnbound, constraintUnbound)) {
+                            return tree.AddChild((currentTypeConstraint, checkAgainst));
+                        } else {
+                            return tree.AddFalse();
+                        }
+                    }
+
+                    var isAssignable = compilation.HasImplicitConversion( checkAgainst, constraint);
+                    if (isAssignable) {
+                        // if the types are assignable, we can return true
+                        return tree.AddChild((currentTypeConstraint, checkAgainst));
+                    } else {
+                        return tree.AddFalse();
+                    }
+                    return xxx;
+
                     return ImmutableArray<TypeConstraintResultTree>.Empty;
                 }
 
                 ImmutableArray<TypeConstraintResultTree> CheckAgainstExactType(ImmutableArray<TypeConstraintResultTree> tree, INamedTypeSymbol namedCheckAgainst, INamedTypeSymbol namedConstraint) {
                     if (!SymbolEqualityComparer.Default.Equals(GeneralizeGeneric(namedConstraint), GeneralizeGeneric(namedCheckAgainst))) {
+                        var namedC = GeneralizeGeneric(namedConstraint);
+                        var namedA = GeneralizeGeneric(namedCheckAgainst);
                         return tree.AddFalse();
                     }
                     // if it is geneirc also check type parameters
@@ -422,7 +498,7 @@ public class InvokeGenerator : IIncrementalGenerator {
                         // every TypeParameter must be valid, so chaining the different nodes in a long linek
                         var subTree = tree;
                         for (global::System.Int32 i = 0; i < namedConstraint.TypeArguments.Length; i++) {
-                            subTree = CheckTypeConsraint(namedConstraint.TypeArguments[i], namedCheckAgainst.TypeArguments[i], subTree);
+                            subTree = CheckTypeConsraint(namedConstraint.TypeArguments[i], namedCheckAgainst.TypeArguments[i], subTree, compilation, currentTypeConstraint: currentTypeConstraint);
                             if (!subTree.Any()) {
                                 break; // we can stop if subTree has no valid 
                             }
@@ -445,7 +521,7 @@ public class InvokeGenerator : IIncrementalGenerator {
                     if (mapping.Key) {
 
                         return mapping.GroupBy(s => s.TypeMapping[typeParameterConstraint], SymbolEqualityComparer.Default)
-                        .SelectMany(x => CheckTypeConsraint((ITypeSymbol)x.Key!, checkAgainst, x.AddTrue())).Where(x => x.Succsess);
+                        .SelectMany(x => CheckTypeConsraint((ITypeSymbol)x.Key!, checkAgainst, x.AddTrue(), compilation,currentTypeConstraint:currentTypeConstraint)).Where(x => x.Succsess);
 
                         //CheckTypeConsraint(s.TypeMapping[typeParameterConstraint], checkAgainst, mapping.AddTrue());
                         //return mapping.Select(s => SymbolEqualityComparer.Default.Equals(s.TypeMapping[typeParameterConstraint], checkAgainst) ? s.AddTrue() : s.AddFalse()).Where(x => x.Succsess);
@@ -482,7 +558,7 @@ public class InvokeGenerator : IIncrementalGenerator {
 
                             var subTree = tree;
                             foreach (var typeConstraint in typeParameterConstraint.ConstraintTypes) {
-                                subTree = CheckTypeConsraint(typeConstraint, checkAgainst, subTree, currentTypeConstraint: typeParameterConstraint);
+                                subTree = CheckTypeConsraint(typeConstraint, checkAgainst, subTree, compilation, currentTypeConstraint: typeParameterConstraint);
                                 if (subTree.Length == 0) {
                                     break;
                                 }
@@ -497,13 +573,13 @@ public class InvokeGenerator : IIncrementalGenerator {
 
 
             } else if (constraint is IArrayTypeSymbol arrayConstraint && checkAgainst is IArrayTypeSymbol arrayCheckedAgainst) {
-                return CheckTypeConsraint(arrayConstraint.ElementType, arrayCheckedAgainst.ElementType, tree).AddChild((currentTypeConstraint, checkAgainst));
+                return CheckTypeConsraint(arrayConstraint.ElementType, arrayCheckedAgainst.ElementType, tree, compilation, currentTypeConstraint: currentTypeConstraint).AddChild((currentTypeConstraint, checkAgainst));
             } else if (constraint is IDynamicTypeSymbol dynamicConstraint && checkAgainst is IDynamicTypeSymbol dynamicCheckedAgainst) {
                 return tree.AddChild((currentTypeConstraint, checkAgainst));
             } else if (constraint is IFunctionPointerTypeSymbol functionPointerConstraint && checkAgainst is IFunctionPointerTypeSymbol functionPointerCheckedAgainst) {
                 return SymbolEqualityComparer.Default.Equals(functionPointerConstraint.Signature, functionPointerCheckedAgainst.Signature) ? tree.AddChild((currentTypeConstraint, checkAgainst)) : tree.AddFalse();
             } else if (constraint is IPointerTypeSymbol pointerConstraint && checkAgainst is IPointerTypeSymbol pointerCheckedAgainst) {
-                return CheckTypeConsraint(pointerConstraint.PointedAtType, pointerCheckedAgainst.PointedAtType, tree).AddChild((currentTypeConstraint, checkAgainst));
+                return CheckTypeConsraint(pointerConstraint.PointedAtType, pointerCheckedAgainst.PointedAtType, tree, compilation, currentTypeConstraint: currentTypeConstraint).AddChild((currentTypeConstraint, checkAgainst));
             } else {
                 return tree.AddFalse();
             }

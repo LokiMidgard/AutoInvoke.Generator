@@ -10,7 +10,7 @@ using Microsoft.CodeAnalysis.CSharp.Syntax;
 namespace AutoInvoke.Generator.Configuration;
 
 internal record MethodConfiguration {
-    public required ImmutableList<RunConfiguration> Configurations { get; set; }
+    public required RunConfiguration Configurations { get; set; }
     public required TypeDeclarationSyntax DefinedIn { get; set; }
     public required IMethodSymbol MethodToCall { get; set; }
     public required string ImplementedMethodName { get; set; }

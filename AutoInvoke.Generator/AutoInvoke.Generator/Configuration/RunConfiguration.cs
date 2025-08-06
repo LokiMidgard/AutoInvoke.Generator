@@ -8,11 +8,11 @@ namespace AutoInvoke.Generator.Configuration;
 
 internal record RunConfiguration {
     public bool ScanExternalAssemblys { get; set; } = false;
-    public required ImmutableList<RegexConstraint> TypesToHandle { get; set; }
-    public bool CallForAbstractClasses { get; set; } = false;
-    public bool CallForInterfaces { get; set; } = false;
-    public bool CallForStructs { get; set; } = true;
-    public bool CallForRecords { get; set; } = true;
-    public bool CallForClasses { get; set; } = true;
-    public bool CallForEnums { get; set; } = true;
+    public required ImmutableList<TypeConfiguration> TypeConfigurations { get; set; }
+}
+
+
+internal record TypeConfiguration {
+    public required CallFor CallFor { get; set; }
+    public required string? TypeNamePattern { get; set; }
 }

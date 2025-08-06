@@ -16,6 +16,7 @@
 		<SuppressDependenciesWhenPacking>true</SuppressDependenciesWhenPacking>
 		<DevelopmentDependency>true</DevelopmentDependency>
 		<IsRoslynComponent>true</IsRoslynComponent>
+		
 	</PropertyGroup>
 
 	<PropertyGroup>
@@ -32,6 +33,7 @@
 		<Description>
 			A generator that invokes a specified Metohd for ever Type in your Project that sattisfis a defined constraint
 		</Description>
+		<GeneratePackageOnBuild>True</GeneratePackageOnBuild>
 
 	</PropertyGroup>
 
